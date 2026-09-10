@@ -1,0 +1,9 @@
+[project]
+name = "interview-prep-coach"
+version = "0.1.0"
+description = "Open-source, document-based AI interview preparation coach"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

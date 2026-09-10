@@ -1,0 +1,20 @@
+name: system_design
+version: "1.0"
+
+criteria:
+  requirements_clarity:
+    weight: 10
+  architecture:
+    weight: 25
+  scalability:
+    weight: 20
+  reliability:
+    weight: 15
+  data_design:
+    weight: 15
+  security:
+    weight: 5
+  observability:
+    weight: 5
+  communication:
+    weight: 5

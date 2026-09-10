@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project: SQLite data
+*.db
+*.sqlite3
+
+# Project: Node / frontend
+node_modules/
+frontend/dist/
+frontend/.next/
+
+# Project: local service data (docker volumes are separate, but guard against local runs)
+qdrant_storage/
+.ollama/

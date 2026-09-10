@@ -24,6 +24,7 @@ class Document(Base):
     filename = Column(String, nullable=False)
     content_hash = Column(String, unique=True, nullable=False, index=True)
     status = Column(String, default="pending")  # pending|processing|done|failed
+    error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

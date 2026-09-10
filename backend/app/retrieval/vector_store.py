@@ -3,12 +3,13 @@ Vector store abstraction over Qdrant. Qdrant is a retrieval index only —
 never the source of truth (that's the relational DB, see app/db/models.py).
 """
 from dataclasses import dataclass
+from functools import lru_cache
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams, Filter, FieldCondition, MatchValue
 from sentence_transformers import SentenceTransformer
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 
 @dataclass
@@ -66,3 +67,9 @@ class VectorStore:
             limit=limit,
         )
         return [RetrievedQuestion(question_id=str(r.id), score=r.score) for r in results]
+
+
+@lru_cache
+def get_vector_store() -> VectorStore:
+    """Process-wide singleton so the embedding model loads once."""
+    return VectorStore(get_settings())

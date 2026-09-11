@@ -11,6 +11,17 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend calls the backend at `http://localhost:8000/api/v1` by
+default (see `frontend/.env.example`); the backend's CORS allow-list
+(`IPC_CORS_ALLOWED_ORIGINS`) must include the origin you're serving the
+frontend from, or the browser will silently block the requests.
+
 ## Adding an LLM provider
 
 Implement the `LLMProvider` interface in `app/llm_providers/base.py` and register
@@ -49,6 +60,11 @@ To roll back one revision: `alembic downgrade -1`.
 ```bash
 cd backend
 pytest
+```
+
+```bash
+cd frontend
+npm test
 ```
 
 ## Pull requests

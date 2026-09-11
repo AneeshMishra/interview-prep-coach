@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     # App
     app_env: str = "local"
 
+    # CORS — the React frontend (Vite dev server or the Docker Compose nginx
+    # build) runs on a different origin than the API, so the browser needs
+    # these allowed explicitly. Comma-separated so it's easy to set via .env.
+    cors_allowed_origins: str = "http://localhost:3000,http://localhost:5173"
+
+    @property
+    def cors_allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]
+
     # Uploads
     max_upload_size_bytes: int = 10 * 1024 * 1024  # 10 MB
 

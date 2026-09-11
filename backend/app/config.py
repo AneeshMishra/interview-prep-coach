@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Uploads
     max_upload_size_bytes: int = 10 * 1024 * 1024  # 10 MB
 
+    # Extraction quality — see docs/architecture.md P1-007: records below
+    # this confidence are flagged for human review rather than trusted outright.
+    low_confidence_threshold: float = 0.75
+
 
 @lru_cache
 def get_settings() -> Settings:

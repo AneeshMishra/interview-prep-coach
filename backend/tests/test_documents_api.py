@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.db.base import Base, get_db
 from app.main import app
 
@@ -80,18 +81,18 @@ def test_upload_ingests_and_questions_are_searchable(tmp_path, monkeypatch):
         file_bytes = make_docx_bytes(tmp_path)
 
         response = client.post(
-            "/documents/upload",
+            "/api/v1/documents/upload",
             files={"file": ("sample.docx", file_bytes, "application/octet-stream")},
         )
         assert response.status_code == 200
         body = response.json()
         document_id = body["document_id"]
 
-        docs = client.get("/documents").json()
+        docs = client.get("/api/v1/documents").json()
         assert docs[0]["id"] == document_id
         assert docs[0]["status"] == "done"
 
-        questions = client.get("/questions", params={"company": "Amazon"}).json()
+        questions = client.get("/api/v1/questions", params={"company": "Amazon"}).json()
         assert len(questions) == 1
         assert questions[0]["question"] == "Design a URL shortener."
 
@@ -106,11 +107,11 @@ def test_duplicate_upload_is_detected_by_content_hash(tmp_path, monkeypatch):
         file_bytes = make_docx_bytes(tmp_path)
 
         first = client.post(
-            "/documents/upload",
+            "/api/v1/documents/upload",
             files={"file": ("sample.docx", file_bytes, "application/octet-stream")},
         ).json()
         second = client.post(
-            "/documents/upload",
+            "/api/v1/documents/upload",
             files={"file": ("sample.docx", file_bytes, "application/octet-stream")},
         ).json()
 
@@ -124,9 +125,44 @@ def test_rejects_non_docx_upload(tmp_path, monkeypatch):
     client, _ = make_client(tmp_path, monkeypatch)
     try:
         response = client.post(
-            "/documents/upload",
+            "/api/v1/documents/upload",
             files={"file": ("sample.txt", b"not a docx", "text/plain")},
         )
         assert response.status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_rejects_upload_over_size_limit(tmp_path, monkeypatch):
+    client, _ = make_client(tmp_path, monkeypatch)
+    app.dependency_overrides[get_settings] = lambda: Settings(max_upload_size_bytes=10)
+    try:
+        file_bytes = make_docx_bytes(tmp_path)
+        assert len(file_bytes) > 10
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("sample.docx", file_bytes, "application/octet-stream")},
+        )
+        assert response.status_code == 413
+
+        assert client.get("/api/v1/documents").json() == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_upload_sanitizes_path_traversal_filename(tmp_path, monkeypatch):
+    client, _ = make_client(tmp_path, monkeypatch)
+    try:
+        file_bytes = make_docx_bytes(tmp_path)
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("../../etc/passwd.docx", file_bytes, "application/octet-stream")},
+        )
+        assert response.status_code == 200
+
+        docs = client.get("/api/v1/documents").json()
+        assert docs[0]["filename"] == "passwd.docx"
     finally:
         app.dependency_overrides.clear()

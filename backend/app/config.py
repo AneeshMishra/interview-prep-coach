@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # App
     app_env: str = "local"
 
+    # Uploads
+    max_upload_size_bytes: int = 10 * 1024 * 1024  # 10 MB
+
 
 @lru_cache
 def get_settings() -> Settings:

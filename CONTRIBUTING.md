@@ -24,8 +24,10 @@ frontend from, or the browser will silently block the requests.
 
 ## Adding an LLM provider
 
-Implement the `LLMProvider` interface in `app/llm_providers/base.py` and register
-it in `app/config.py`.
+Implement the `LLMProvider` interface in `app/llm_providers/base.py`, register
+it in `app/llm_providers/factory.py`, and add any provider-specific settings
+(e.g. an API key) to `app/config.py`. See `openai_provider.py` for the
+pattern: plain `httpx` calls to the provider's REST API, no vendor SDK.
 
 ## Adding a rubric
 

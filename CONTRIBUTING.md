@@ -21,6 +21,29 @@ it in `app/config.py`.
 Add a new YAML file under `app/rubrics/` following the schema in
 `app/rubrics/system_design.yaml`.
 
+## Database migrations
+
+Schema changes are managed with Alembic; the app applies the latest
+migration automatically on startup (`app/db/migrate.py`), so a fresh
+`uvicorn app.main:app` always runs against an up-to-date database.
+
+After changing a model in `app/db/models.py`, generate a migration:
+
+```bash
+cd backend
+alembic revision --autogenerate -m "describe the change"
+```
+
+Review the generated file under `alembic/versions/` — autogenerate doesn't
+always get renames, index changes, or SQLite-specific ALTERs right — then
+apply it:
+
+```bash
+alembic upgrade head
+```
+
+To roll back one revision: `alembic downgrade -1`.
+
 ## Running tests
 
 ```bash

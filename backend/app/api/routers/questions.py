@@ -37,6 +37,7 @@ def _serialize(question: InterviewQuestion, threshold: float) -> dict:
         "source_section": question.source_section,
         "extraction_confidence": question.extraction_confidence,
         "needs_review": _needs_review(question, threshold),
+        "tags": [t.tag for t in question.tags],
         "created_at": question.created_at,
     }
 

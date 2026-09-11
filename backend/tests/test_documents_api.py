@@ -95,6 +95,7 @@ def test_upload_ingests_and_questions_are_searchable(tmp_path, monkeypatch):
         questions = client.get("/api/v1/questions", params={"company": "Amazon"}).json()
         assert len(questions) == 1
         assert questions[0]["question"] == "Design a URL shortener."
+        assert questions[0]["tags"] == ["scaling"]
 
         assert len(fake_vector_store.upserted) == 1
     finally:

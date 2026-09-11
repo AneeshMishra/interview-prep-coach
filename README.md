@@ -4,7 +4,8 @@ A local-first, open-source AI interview preparation coach. Upload past interview
 documents (`.docx`), turn them into a searchable knowledge base, and run stateful mock
 interviews graded against configurable rubrics.
 
-> **Status:** Phase 1 in progress — document ingestion + retrieval.
+> **Status:** Phase 1 in progress — document ingestion, retrieval, and the
+> question explorer UI are working end to end. Mock interviews are Phase 2.
 > See [docs/architecture.md](docs/architecture.md) for the full V1.1 design.
 
 ## Core idea
@@ -65,6 +66,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+
+## Local frontend setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Runs on http://localhost:5173 and talks to the backend on
+http://localhost:8000 by default — see [frontend/README.md](frontend/README.md).
 
 ## License
 

@@ -7,9 +7,10 @@ from functools import lru_cache
 
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams, Filter, FieldCondition, MatchValue
-from sentence_transformers import SentenceTransformer
 
 from app.config import Settings, get_settings
+from app.embeddings.base import EmbeddingProvider
+from app.embeddings.factory import get_embedding_provider
 
 
 @dataclass
@@ -19,23 +20,27 @@ class RetrievedQuestion:
 
 
 class VectorStore:
-    def __init__(self, settings: Settings):
-        self.client = QdrantClient(url=settings.qdrant_url)
+    def __init__(
+        self,
+        settings: Settings,
+        embedding_provider: EmbeddingProvider | None = None,
+        client: QdrantClient | None = None,
+    ):
+        self.client = client or QdrantClient(url=settings.qdrant_url)
         self.collection = settings.qdrant_collection
-        self.embedder = SentenceTransformer(settings.embedding_model)
+        self.embedder = embedding_provider or get_embedding_provider(settings)
         self._ensure_collection()
 
     def _ensure_collection(self):
         existing = [c.name for c in self.client.get_collections().collections]
         if self.collection not in existing:
-            vector_size = self.embedder.get_sentence_embedding_dimension()
             self.client.create_collection(
                 collection_name=self.collection,
-                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+                vectors_config=VectorParams(size=self.embedder.dimension, distance=Distance.COSINE),
             )
 
     def upsert_question(self, question_id: str, text: str, metadata: dict):
-        vector = self.embedder.encode(text).tolist()
+        vector = self.embedder.embed([text])[0]
         self.client.upsert(
             collection_name=self.collection,
             points=[PointStruct(id=question_id, vector=vector, payload=metadata)],
@@ -58,15 +63,19 @@ class VectorStore:
             conditions.append(FieldCondition(key="round_type", match=MatchValue(value=round_type)))
 
         query_filter = Filter(must=conditions) if conditions else None
-        vector = self.embedder.encode(query).tolist()
+        vector = self.embedder.embed([query])[0]
 
-        results = self.client.search(
+        # QdrantClient.search() was removed in newer qdrant-client releases
+        # in favor of query_points(); this was never caught before because
+        # every other test exercised a FakeVectorStore instead of a real
+        # QdrantClient (see tests/test_vector_store.py).
+        response = self.client.query_points(
             collection_name=self.collection,
-            query_vector=vector,
+            query=vector,
             query_filter=query_filter,
             limit=limit,
         )
-        return [RetrievedQuestion(question_id=str(r.id), score=r.score) for r in results]
+        return [RetrievedQuestion(question_id=str(p.id), score=p.score) for p in response.points]
 
 
 @lru_cache

@@ -18,8 +18,10 @@ from app.retrieval.vector_store import VectorStore, get_vector_store
 
 
 def reindex_all_questions(db: Session | None = None, vector_store: VectorStore | None = None) -> int:
-    """Upsert every persisted question into Qdrant. Returns the count reindexed."""
+    """Clear the collection and upsert every persisted question into Qdrant.
+    Returns the count reindexed."""
     vector_store = vector_store or get_vector_store()
+    vector_store.clear()
     owns_session = db is None
     db = db or SessionLocal()
     try:

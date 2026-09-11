@@ -58,6 +58,20 @@ def test_ensure_collection_creates_with_embedder_dimension(store, settings):
     assert info.config.params.vectors.size == 4
 
 
+def test_clear_removes_existing_points(store, settings):
+    store.upsert_question(
+        Q_URL, "Design a URL shortener.", {"company": "Amazon", "role": "Backend", "round_type": "system_design"}
+    )
+    assert store.search("url shortener design", limit=10) != []
+
+    store.clear()
+
+    assert store.search("url shortener design", limit=10) == []
+    # Collection must still exist afterwards (clear = wipe + recreate, not just wipe).
+    info = store.client.get_collection(settings.qdrant_collection)
+    assert info.config.params.vectors.size == 4
+
+
 def test_ensure_collection_is_idempotent(settings):
     client = QdrantClient(location=":memory:")
     embedder = FakeEmbeddingProvider(VECTORS)

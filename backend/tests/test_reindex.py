@@ -10,6 +10,10 @@ from app.ingestion.reindex import reindex_all_questions
 class FakeVectorStore:
     def __init__(self):
         self.upserted = []
+        self.cleared = False
+
+    def clear(self):
+        self.cleared = True
 
     def upsert_question(self, question_id, text, metadata):
         self.upserted.append((question_id, text, metadata))
@@ -47,6 +51,7 @@ def test_reindex_upserts_every_persisted_question(db_session):
     count = reindex_all_questions(db=db_session, vector_store=vector_store)
 
     assert count == 2
+    assert vector_store.cleared is True
     upserted_ids = {item[0] for item in vector_store.upserted}
     assert upserted_ids == {q1.id, q2.id}
 
@@ -67,4 +72,5 @@ def test_reindex_with_no_questions_returns_zero(db_session):
     count = reindex_all_questions(db=db_session, vector_store=vector_store)
 
     assert count == 0
+    assert vector_store.cleared is True
     assert vector_store.upserted == []

@@ -39,6 +39,14 @@ class VectorStore:
                 vectors_config=VectorParams(size=self.embedder.dimension, distance=Distance.COSINE),
             )
 
+    def clear(self):
+        """Delete and recreate the collection. Used before a full rebuild
+        from the relational DB (app/ingestion/reindex.py) so points for
+        questions that no longer exist there don't linger forever — Qdrant
+        must reflect the relational DB exactly, not just be a superset of it."""
+        self.client.delete_collection(collection_name=self.collection)
+        self._ensure_collection()
+
     def upsert_question(self, question_id: str, text: str, metadata: dict):
         vector = self.embedder.embed([text])[0]
         self.client.upsert(

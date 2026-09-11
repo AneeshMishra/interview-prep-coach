@@ -65,6 +65,20 @@ alembic upgrade head
 
 To roll back one revision: `alembic downgrade -1`.
 
+## Rebuilding the Qdrant index
+
+Qdrant is a retrieval index, not the source of truth (ADR-002) — it must
+always be reconstructable from the relational database alone. If it's
+wiped, moved, or you change the embedding model:
+
+```bash
+cd backend
+python -m app.ingestion.reindex
+```
+
+This re-upserts every persisted question. It does not touch the
+relational DB.
+
 ## Running tests
 
 ```bash

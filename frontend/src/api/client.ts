@@ -2,6 +2,7 @@ import type {
   ChatMessageRecord,
   ChatSessionRecord,
   DocumentRecord,
+  InterviewHistoryEntry,
   InterviewMessageRecord,
   InterviewSessionRecord,
   InterviewSummaryRecord,
@@ -111,6 +112,10 @@ export function submitInterviewAnswer(sessionId: string, answer: string): Promis
 
 export function getInterview(sessionId: string): Promise<InterviewSessionRecord> {
   return request<InterviewSessionRecord>(`/interviews/${sessionId}`);
+}
+
+export function listInterviews(): Promise<InterviewHistoryEntry[]> {
+  return request<InterviewHistoryEntry[]>("/interviews");
 }
 
 export function getInterviewTranscript(sessionId: string): Promise<InterviewMessageRecord[]> {

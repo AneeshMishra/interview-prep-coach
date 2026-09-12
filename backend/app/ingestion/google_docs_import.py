@@ -17,7 +17,13 @@ from urllib.parse import unquote
 import httpx
 
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
-GOOGLE_DOC_ID_PATTERN = re.compile(r"/document/d/([a-zA-Z0-9_-]+)")
+
+# Two distinct URL shapes:
+#   Normal share/edit link:  .../document/d/<fileId>/edit
+#   "Publish to the web":    .../document/d/e/<publishedToken>/pub
+# The "e/" segment must be captured together with the token — matching only
+# the token would silently produce the wrong (unusable) id for pub links.
+GOOGLE_DOC_ID_PATTERN = re.compile(r"/document/d/(e/[a-zA-Z0-9_-]+|[a-zA-Z0-9_-]+)")
 
 
 class GoogleDocNotAccessible(Exception):
@@ -29,6 +35,9 @@ class GoogleDocTooLarge(Exception):
 
 
 def extract_google_doc_id(url: str) -> str | None:
+    """Returns the plain fileId for a normal share link, or "e/<token>" for a
+    "Publish to the web" link — export_url_for() needs that "e/" prefix to
+    build a valid URL for the published case."""
     match = GOOGLE_DOC_ID_PATTERN.search(url)
     return match.group(1) if match else None
 

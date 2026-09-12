@@ -30,9 +30,28 @@ class TestExtractGoogleDocId:
         assert extract_google_doc_id("https://example.com/not-a-doc") is None
         assert extract_google_doc_id("https://docs.google.com/spreadsheets/d/abc123") is None
 
+    def test_extracts_id_from_publish_to_web_url(self):
+        # "Publish to the web" links use a distinct .../d/e/<token>/pub shape;
+        # the "e/" prefix must be captured with the token, not dropped, or
+        # export_url_for() builds a URL for a document that doesn't exist.
+        url = (
+            "https://docs.google.com/document/d/e/2PACX-1vREH7wBSxdAMEWhZpuXzzoWWRVFGnawMQ"
+            "uSo4JTfPolgT7oWMwq6epoL96_SgtS0_Bw8sieqeQNLYUW/pub"
+        )
+        assert extract_google_doc_id(url) == (
+            "e/2PACX-1vREH7wBSxdAMEWhZpuXzzoWWRVFGnawMQuSo4JTfPolgT7oWMwq6epoL96_SgtS0_Bw8sieqeQNLYUW"
+        )
+
 
 def test_export_url_uses_docx_format():
     assert export_url_for("abc123") == "https://docs.google.com/document/d/abc123/export?format=docx"
+
+
+def test_export_url_preserves_publish_to_web_prefix():
+    assert (
+        export_url_for("e/2PACX-token")
+        == "https://docs.google.com/document/d/e/2PACX-token/export?format=docx"
+    )
 
 
 class TestSanitizeDocxFilename:

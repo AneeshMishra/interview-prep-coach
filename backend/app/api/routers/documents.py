@@ -125,7 +125,10 @@ async def import_google_doc(
             ),
         ) from exc
 
-    safe_filename = sanitize_docx_filename(exported_filename) or f"google-doc-{doc_id}.docx"
+    # doc_id may contain "/" for a "Publish to the web" link (e.g. "e/<token>"),
+    # which is a valid URL path segment but not a valid filename character.
+    fallback_name = f"google-doc-{doc_id.replace('/', '-')}.docx"
+    safe_filename = sanitize_docx_filename(exported_filename) or fallback_name
     return _register_document_and_start_ingestion(tmp_path, safe_filename, db, background_tasks)
 
 

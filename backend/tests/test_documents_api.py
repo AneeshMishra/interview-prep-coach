@@ -230,6 +230,33 @@ def test_import_google_doc_falls_back_to_id_based_filename(tmp_path, monkeypatch
         app.dependency_overrides.clear()
 
 
+PUBLISH_TO_WEB_URL = (
+    "https://docs.google.com/document/d/e/2PACX-1vREH7wBSxdAMEWhZpuXzzoWWRVFGnawMQ"
+    "uSo4JTfPolgT7oWMwq6epoL96_SgtS0_Bw8sieqeQNLYUW/pub"
+)
+
+
+def test_import_google_doc_accepts_publish_to_web_url(tmp_path, monkeypatch):
+    """A "Publish to the web" link has a distinct .../d/e/<token>/pub shape;
+    the fallback filename must not contain the "/" from that "e/" segment."""
+    client, _ = make_client(tmp_path, monkeypatch)
+    file_bytes = make_docx_bytes(tmp_path)
+    monkeypatch.setattr(
+        "app.api.routers.documents.download_google_doc_as_docx",
+        _stub_google_doc_download(file_bytes, None),
+    )
+    try:
+        response = client.post("/api/v1/documents/import/google-doc", json={"url": PUBLISH_TO_WEB_URL})
+        assert response.status_code == 200
+
+        docs = client.get("/api/v1/documents").json()
+        assert "/" not in docs[0]["filename"]
+        assert docs[0]["filename"].startswith("google-doc-e-2PACX-")
+        assert docs[0]["filename"].endswith(".docx")
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_import_google_doc_detects_duplicate(tmp_path, monkeypatch):
     client, _ = make_client(tmp_path, monkeypatch)
     file_bytes = make_docx_bytes(tmp_path)

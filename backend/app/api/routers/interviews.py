@@ -1,5 +1,6 @@
 """
 POST /interviews — start a mock interview session.
+GET  /interviews — history: past sessions, most recent first.
 POST /interviews/{session_id}/answers — submit an answer, get the next
     question/follow-up, or (once the session ends) the final summary.
 GET  /interviews/{session_id} — session status.
@@ -11,7 +12,7 @@ state_machine.py), not the RAG search chat in app/api/routers/chat.py.
 V1 supports the system_design round only (ADR-007) — the only rubric
 shipped (app/rubrics/system_design.yaml).
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -79,6 +80,10 @@ def _serialize_session(session: InterviewSession) -> dict:
     }
 
 
+def _serialize_session_for_history(session: InterviewSession, overall_score: float | None) -> dict:
+    return {**_serialize_session(session), "overall_score": overall_score}
+
+
 def _get_session_or_404(session_id: str, db: Session) -> InterviewSession:
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if session is None:
@@ -90,6 +95,29 @@ def _result_response(result: AskedQuestion | InterviewCompleted) -> dict:
     if isinstance(result, InterviewCompleted):
         return {"type": "summary", "summary": _serialize_summary(result.summary)}
     return {"type": "message", "message": _serialize_message(result.message)}
+
+
+@router.get("")
+def list_interviews(limit: int = Query(default=50, ge=1, le=200), db: Session = Depends(get_db)):
+    sessions = (
+        db.query(InterviewSession)
+        .order_by(InterviewSession.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not sessions:
+        return []
+
+    scores_by_session_id = {
+        summary.session_id: summary.overall_score
+        for summary in db.query(InterviewSummary)
+        .filter(InterviewSummary.session_id.in_([s.id for s in sessions]))
+        .all()
+    }
+    return [
+        _serialize_session_for_history(session, scores_by_session_id.get(session.id))
+        for session in sessions
+    ]
 
 
 @router.post("")

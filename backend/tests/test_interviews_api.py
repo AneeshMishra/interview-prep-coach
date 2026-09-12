@@ -207,3 +207,30 @@ def test_create_interview_returns_503_when_llm_unreachable_and_no_stored_questio
         assert response.status_code == 503
     finally:
         app.dependency_overrides.clear()
+
+
+def test_list_interviews_is_empty_when_none_started(client_factory):
+    client = client_factory([])
+    assert client.get("/api/v1/interviews").json() == []
+
+
+def test_list_interviews_shows_most_recent_first_with_score_once_completed(client_factory):
+    responses = [no_followup_response() for _ in range(MAX_QUESTIONS)] + [summary_response()]
+    client = client_factory(responses)
+
+    first = client.post("/api/v1/interviews", json={"company": "Amazon"}).json()
+    second = client.post("/api/v1/interviews", json={"company": "Amazon"}).json()
+
+    for _ in range(MAX_QUESTIONS):
+        client.post(f"/api/v1/interviews/{first['session']['id']}/answers", json={"answer": "a"})
+
+    history = client.get("/api/v1/interviews").json()
+    assert [s["id"] for s in history] == [second["session"]["id"], first["session"]["id"]]
+
+    completed_entry = next(s for s in history if s["id"] == first["session"]["id"])
+    assert completed_entry["status"] == "completed"
+    assert completed_entry["overall_score"] == pytest.approx(4.0)
+
+    active_entry = next(s for s in history if s["id"] == second["session"]["id"])
+    assert active_entry["status"] == "active"
+    assert active_entry["overall_score"] is None

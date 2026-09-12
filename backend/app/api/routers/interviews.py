@@ -107,18 +107,23 @@ def create_interview(
     rubric = load_rubric(ROUND_TYPE)
     try:
         llm = get_llm_provider(settings)
+        # NOTE: get_llm_provider() constructing successfully doesn't mean
+        # the provider is reachable — Ollama/OpenAI/Anthropic clients only
+        # make a network call once .complete() actually runs, which
+        # start_interview() may do internally (no stored question to ask
+        # yet). Both failure points are wrapped here, not just construction.
+        result = start_interview(
+            db=db,
+            llm=llm,
+            llm_provider_name=settings.llm_provider,
+            llm_model=settings.llm_model,
+            rubric=rubric,
+            company=payload.company,
+            role=payload.role,
+        )
     except Exception as exc:  # noqa: BLE001 - LLM unreachable/misconfigured
         raise HTTPException(status_code=503, detail="Could not start the interview right now.") from exc
 
-    result = start_interview(
-        db=db,
-        llm=llm,
-        llm_provider_name=settings.llm_provider,
-        llm_model=settings.llm_model,
-        rubric=rubric,
-        company=payload.company,
-        role=payload.role,
-    )
     session = db.query(InterviewSession).filter(
         InterviewSession.id == result.message.session_id
     ).first()
@@ -163,12 +168,14 @@ def answer_interview(
     rubric = load_rubric(session.round_type)
     try:
         llm = get_llm_provider(settings)
-    except Exception as exc:  # noqa: BLE001 - LLM unreachable/misconfigured
-        raise HTTPException(status_code=503, detail="Could not evaluate the answer right now.") from exc
-
-    try:
+        # As in create_interview: constructing the provider can't fail for
+        # Ollama/OpenAI/Anthropic — only calling .complete() can, and
+        # submit_answer() does that internally (evaluation, and possibly
+        # the final summary). Both are covered by this one try block.
         result = submit_answer(db=db, session=session, answer_text=text, llm=llm, rubric=rubric)
     except InterviewNotActiveError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - LLM unreachable/misconfigured
+        raise HTTPException(status_code=503, detail="Could not evaluate the answer right now.") from exc
 
     return _result_response(result)

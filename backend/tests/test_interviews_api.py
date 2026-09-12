@@ -161,3 +161,49 @@ def test_answering_a_completed_session_returns_400(client_factory):
 
     response = client.post(f"/api/v1/interviews/{session_id}/answers", json={"answer": "one more"})
     assert response.status_code == 400
+
+
+class ExplodingLLM:
+    """Mimics a real provider unreachable at .complete()-time, not construction —
+    exactly what OllamaProvider/OpenAIProvider/AnthropicProvider do: none of them
+    make a network call until complete() actually runs."""
+
+    def complete(self, system_prompt, user_prompt):
+        raise ConnectionError("Connection refused")
+
+
+def test_answer_returns_503_rather_than_500_when_llm_unreachable(client_factory, monkeypatch):
+    client = client_factory([])  # first question comes from a stored question, no LLM call needed
+    monkeypatch.setattr("app.api.routers.interviews.get_llm_provider", lambda settings: ExplodingLLM())
+    created = client.post("/api/v1/interviews", json={"company": "Amazon"}).json()
+
+    response = client.post(
+        f"/api/v1/interviews/{created['session']['id']}/answers", json={"answer": "my answer"}
+    )
+    assert response.status_code == 503
+
+
+def test_create_interview_returns_503_when_llm_unreachable_and_no_stored_question(monkeypatch):
+    # No questions seeded at all -> start_interview must fall back to
+    # generating one via the LLM, which is where the unreachable provider
+    # actually surfaces (get_llm_provider() itself never raises).
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    TestingSession = sessionmaker(bind=engine)
+
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr("app.api.routers.interviews.get_llm_provider", lambda settings: ExplodingLLM())
+
+    try:
+        client = TestClient(app)
+        response = client.post("/api/v1/interviews", json={"company": "BrandNewCo"})
+        assert response.status_code == 503
+    finally:
+        app.dependency_overrides.clear()

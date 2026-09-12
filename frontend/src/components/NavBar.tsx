@@ -11,6 +11,9 @@ export function NavBar() {
         <NavLink to="/questions" className={({ isActive }) => (isActive ? "active" : "")}>
           Question Explorer
         </NavLink>
+        <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : "")}>
+          Chat
+        </NavLink>
       </nav>
     </header>
   );

@@ -56,3 +56,19 @@ export interface UploadResponse {
   status: DocumentStatus | "duplicate";
   detail?: string;
 }
+
+export interface ChatSessionRecord {
+  id: string;
+  created_at: string;
+}
+
+export type ChatRole = "user" | "assistant";
+
+export interface ChatMessageRecord {
+  id: string;
+  session_id: string;
+  role: ChatRole;
+  content: string;
+  cited_question_ids: string[];
+  created_at: string;
+}

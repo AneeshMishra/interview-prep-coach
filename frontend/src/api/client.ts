@@ -1,4 +1,11 @@
-import type { DocumentRecord, Question, QuestionFilters, UploadResponse } from "./types";
+import type {
+  ChatMessageRecord,
+  ChatSessionRecord,
+  DocumentRecord,
+  Question,
+  QuestionFilters,
+  UploadResponse,
+} from "./types";
 
 // Browser-context default: the backend container/process publishes its API
 // on localhost:8000 regardless of whether this app itself runs via `vite
@@ -63,4 +70,20 @@ export function listQuestions(filters: QuestionFilters = {}): Promise<Question[]
 
 export function getQuestion(questionId: string): Promise<Question> {
   return request<Question>(`/questions/${questionId}`);
+}
+
+export function createChatSession(): Promise<ChatSessionRecord> {
+  return request<ChatSessionRecord>("/chat/sessions", { method: "POST" });
+}
+
+export function listChatMessages(sessionId: string): Promise<ChatMessageRecord[]> {
+  return request<ChatMessageRecord[]>(`/chat/sessions/${sessionId}/messages`);
+}
+
+export function sendChatMessage(sessionId: string, message: string): Promise<ChatMessageRecord> {
+  return request<ChatMessageRecord>(`/chat/sessions/${sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
 }

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError, startInterview, submitInterviewAnswer } from "../api/client";
 import type {
   InterviewMessageRecord,
   InterviewSessionRecord,
   InterviewSummaryRecord,
 } from "../api/types";
+import { InterviewBubble, SummaryCard } from "../components/InterviewDisplay";
 import { ErrorMessage, Loading } from "../components/StatusStates";
 
 type Phase = "setup" | "in-progress" | "completed";
@@ -94,12 +96,19 @@ export function InterviewPage() {
 
   return (
     <section className="chat-page">
-      <h1>Mock Interview</h1>
-      <p className="page-subtitle">
-        A System Design mock interview: one question at a time, evaluated against a rubric, with a
-        scored summary at the end. Questions are pulled from your uploaded knowledge base when
-        available.
-      </p>
+      <div className="page-header-row">
+        <div>
+          <h1>Mock Interview</h1>
+          <p className="page-subtitle">
+            A System Design mock interview: one question at a time, evaluated against a rubric, with
+            a scored summary at the end. Questions are pulled from your uploaded knowledge base when
+            available.
+          </p>
+        </div>
+        <Link to="/interviews" className="page-header-row__link">
+          Past Interviews →
+        </Link>
+      </div>
 
       {phase === "setup" && (
         <form className="interview-setup-form" onSubmit={handleStart}>
@@ -161,56 +170,5 @@ export function InterviewPage() {
         </>
       )}
     </section>
-  );
-}
-
-function InterviewBubble({ message }: { message: InterviewMessageRecord }) {
-  const variant = message.role === "candidate" ? "user" : "assistant";
-  return (
-    <div className={`chat-bubble chat-bubble--${variant}`}>
-      <div className="chat-bubble__content">{message.content}</div>
-    </div>
-  );
-}
-
-function SummaryCard({ summary }: { summary: InterviewSummaryRecord }) {
-  return (
-    <div className="interview-summary-card">
-      <h2>Interview Summary</h2>
-      <p className="interview-summary-card__score">Overall score: {summary.overall_score.toFixed(1)} / 5</p>
-
-      {summary.strengths.length > 0 && (
-        <>
-          <h3>Strengths</h3>
-          <ul>
-            {summary.strengths.map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {summary.weaknesses.length > 0 && (
-        <>
-          <h3>Weaknesses</h3>
-          <ul>
-            {summary.weaknesses.map((w, i) => (
-              <li key={i}>{w}</li>
-            ))}
-          </ul>
-        </>
-      )}
-
-      {summary.recommendations.length > 0 && (
-        <>
-          <h3>Recommendations</h3>
-          <ul>
-            {summary.recommendations.map((r, i) => (
-              <li key={i}>{r}</li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
   );
 }

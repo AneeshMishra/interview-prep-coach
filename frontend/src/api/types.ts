@@ -87,6 +87,10 @@ export interface InterviewSessionRecord {
   completed_at: string | null;
 }
 
+export interface InterviewHistoryEntry extends InterviewSessionRecord {
+  overall_score: number | null;
+}
+
 export type InterviewMessageRole = "interviewer" | "candidate";
 
 export interface InterviewMessageRecord {

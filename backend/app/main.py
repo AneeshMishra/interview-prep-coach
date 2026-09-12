@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import chat, documents, interviews, questions
+from app.api.routers import auth, chat, documents, interviews, questions
 from app.config import get_settings
 from app.db.migrate import run_migrations
 
@@ -18,10 +18,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_allowed_origins_list,
+    allow_credentials=True,  # session cookies ride on every /api/v1 request
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(questions.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")

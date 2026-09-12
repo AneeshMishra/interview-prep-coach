@@ -812,6 +812,31 @@ PostgreSQL can be enabled as an alternative deployment profile.
 
 ---
 
+## ADR-011 — Multi-User Auth via External OAuth/SSO, Stateless JWT Sessions
+
+**Status:** Accepted
+
+**Decision:** Every account is identified by an external OAuth/SSO provider — there is no local
+password. `User` and `OAuthAccount` tables were added; `Document`, `ChatSession` and
+`InterviewSession` each gained a required `user_id`, and every ingestion, retrieval, chat and
+mock-interview code path is scoped to the signed-in user (never a global query). Google is the
+first provider implemented behind a shared `OAuthProvider` interface
+(`backend/app/auth/oauth/`); Facebook, LinkedIn and Azure AD SSO are the same interface, added as
+thin adapters once needed. A session is a short-lived signed JWT access token plus a longer-lived
+JWT refresh token, both in httpOnly cookies — not a server-side session table and not Redis (which
+CLAUDE.md defers), so there is nothing to expire, evict, or lose on restart.
+
+**Reason:** Delegating identity to established providers avoids ever storing or handling
+passwords. A stateless JWT session keeps this consistent with "Redis is deferred" and "never use
+an in-memory dict as the session store": the relational database stays the only system of record,
+and horizontal scaling needs no shared session store. Pre-existing rows (from before multi-user
+support existed) are backfilled onto one seed/dev user by the migration rather than dropped, so
+upgrading in place loses no data. `content_hash` deduplication on `Document` moved from globally
+unique to unique per-user, since two different users uploading identical file content are
+independent knowledge bases, not a duplicate of each other.
+
+---
+
 # 18. Repository Structure
 
 ```text

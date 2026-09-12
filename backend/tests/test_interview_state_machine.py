@@ -16,6 +16,7 @@ from app.interview.state_machine import (
     start_interview,
     submit_answer,
 )
+from tests.auth_helpers import create_user
 
 
 class ScriptedLLM:
@@ -83,8 +84,15 @@ def rubric():
     return load_rubric("system_design")
 
 
-def seed_question(db, company="Amazon", question="Design a URL shortener."):
-    document = Document(filename="sample.docx", content_hash=f"hash-{question}", status="done")
+@pytest.fixture
+def user_id(db_session):
+    return create_user(db_session).id
+
+
+def seed_question(db, user_id, company="Amazon", question="Design a URL shortener."):
+    document = Document(
+        user_id=user_id, filename="sample.docx", content_hash=f"hash-{question}", status="done"
+    )
     db.add(document)
     db.commit()
     q = InterviewQuestion(
@@ -97,13 +105,13 @@ def seed_question(db, company="Amazon", question="Design a URL shortener."):
     return q
 
 
-def test_start_interview_asks_a_real_stored_question_when_available(db_session, rubric):
-    question = seed_question(db_session, company="Amazon", question="Design a URL shortener.")
+def test_start_interview_asks_a_real_stored_question_when_available(db_session, rubric, user_id):
+    question = seed_question(db_session, user_id, company="Amazon", question="Design a URL shortener.")
     llm = ScriptedLLM([])  # should not be called — a real question exists
 
     result = start_interview(
         db=db_session, llm=llm, llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
 
     assert isinstance(result, AskedQuestion)
@@ -118,12 +126,12 @@ def test_start_interview_asks_a_real_stored_question_when_available(db_session, 
     assert session.rubric_version == rubric.version
 
 
-def test_start_interview_falls_back_to_llm_when_no_question_exists(db_session, rubric):
+def test_start_interview_falls_back_to_llm_when_no_question_exists(db_session, rubric, user_id):
     llm = ScriptedLLM(["Design a rate limiter for a public API."])
 
     result = start_interview(
         db=db_session, llm=llm, llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="SomeCompany", role="SRE",
+        rubric=rubric, company="SomeCompany", role="SRE", user_id=user_id,
     )
 
     assert result.message.content == "Design a rate limiter for a public API."
@@ -131,12 +139,12 @@ def test_start_interview_falls_back_to_llm_when_no_question_exists(db_session, r
     assert len(llm.calls) == 1
 
 
-def test_submit_answer_asks_follow_up_when_llm_flags_a_gap(db_session, rubric):
-    seed_question(db_session)
+def test_submit_answer_asks_follow_up_when_llm_flags_a_gap(db_session, rubric, user_id):
+    seed_question(db_session, user_id)
     llm = ScriptedLLM([followup_response()])
     started = start_interview(
         db=db_session, llm=ScriptedLLM([]), llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
     session = db_session.query(InterviewSession).first()
 
@@ -147,14 +155,14 @@ def test_submit_answer_asks_follow_up_when_llm_flags_a_gap(db_session, rubric):
     assert result.message.question_id == started.message.question_id  # tied to the same root question
 
 
-def test_submit_answer_caps_followups_per_question(db_session, rubric):
-    seed_question(db_session, question="Design a URL shortener.")
-    seed_question(db_session, question="Design a rate limiter.")
+def test_submit_answer_caps_followups_per_question(db_session, rubric, user_id):
+    seed_question(db_session, user_id, question="Design a URL shortener.")
+    seed_question(db_session, user_id, question="Design a rate limiter.")
 
     llm_start = ScriptedLLM([])
     start_interview(
         db=db_session, llm=llm_start, llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
     session = db_session.query(InterviewSession).first()
 
@@ -171,14 +179,14 @@ def test_submit_answer_caps_followups_per_question(db_session, rubric):
     assert second.message.question_id != first.message.question_id
 
 
-def test_interview_completes_after_max_questions(db_session, rubric):
+def test_interview_completes_after_max_questions(db_session, rubric, user_id):
     for i in range(MAX_QUESTIONS):
-        seed_question(db_session, question=f"Question {i}")
+        seed_question(db_session, user_id, question=f"Question {i}")
 
     llm_start = ScriptedLLM([])
     start_interview(
         db=db_session, llm=llm_start, llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
     session = db_session.query(InterviewSession).first()
 
@@ -200,11 +208,11 @@ def test_interview_completes_after_max_questions(db_session, rubric):
     assert session.completed_at is not None
 
 
-def test_submit_answer_rejects_completed_session(db_session, rubric):
-    seed_question(db_session)
+def test_submit_answer_rejects_completed_session(db_session, rubric, user_id):
+    seed_question(db_session, user_id)
     start_interview(
         db=db_session, llm=ScriptedLLM([]), llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
     session = db_session.query(InterviewSession).first()
     session.status = "completed"
@@ -214,18 +222,18 @@ def test_submit_answer_rejects_completed_session(db_session, rubric):
         submit_answer(db=db_session, session=session, answer_text="too late", llm=ScriptedLLM([]), rubric=rubric)
 
 
-def test_overall_score_is_computed_by_app_not_trusted_from_llm(db_session, rubric):
+def test_overall_score_is_computed_by_app_not_trusted_from_llm(db_session, rubric, user_id):
     """The summarizer LLM is never asked for (and its output never supplies)
     the numeric overall_score — it's always the average of persisted,
     rubric-weighted Evaluation.score values."""
-    seed_question(db_session, question="Q1")
-    seed_question(db_session, question="Q2")
-    seed_question(db_session, question="Q3")
-    seed_question(db_session, question="Q4")
+    seed_question(db_session, user_id, question="Q1")
+    seed_question(db_session, user_id, question="Q2")
+    seed_question(db_session, user_id, question="Q3")
+    seed_question(db_session, user_id, question="Q4")
 
     start_interview(
         db=db_session, llm=ScriptedLLM([]), llm_provider_name="ollama", llm_model="llama3",
-        rubric=rubric, company="Amazon", role="Backend Engineer",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
     )
     session = db_session.query(InterviewSession).first()
 

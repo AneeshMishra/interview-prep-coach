@@ -16,9 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.config import Settings, get_settings
 from app.db.base import get_db
-from app.db.models import InterviewSession, InterviewSummary
+from app.db.models import InterviewSession, InterviewSummary, User
 from app.interview.rubric import load_rubric
 from app.interview.state_machine import (
     ROUND_TYPE,
@@ -84,8 +85,12 @@ def _serialize_session_for_history(session: InterviewSession, overall_score: flo
     return {**_serialize_session(session), "overall_score": overall_score}
 
 
-def _get_session_or_404(session_id: str, db: Session) -> InterviewSession:
-    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+def _get_session_or_404(session_id: str, user_id: str, db: Session) -> InterviewSession:
+    session = (
+        db.query(InterviewSession)
+        .filter(InterviewSession.id == session_id, InterviewSession.user_id == user_id)
+        .first()
+    )
     if session is None:
         raise HTTPException(status_code=404, detail="Interview session not found.")
     return session
@@ -98,9 +103,14 @@ def _result_response(result: AskedQuestion | InterviewCompleted) -> dict:
 
 
 @router.get("")
-def list_interviews(limit: int = Query(default=50, ge=1, le=200), db: Session = Depends(get_db)):
+def list_interviews(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     sessions = (
         db.query(InterviewSession)
+        .filter(InterviewSession.user_id == current_user.id)
         .order_by(InterviewSession.started_at.desc())
         .limit(limit)
         .all()
@@ -125,6 +135,7 @@ def create_interview(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
     if payload.round_type != ROUND_TYPE:
         raise HTTPException(
@@ -148,6 +159,7 @@ def create_interview(
             rubric=rubric,
             company=payload.company,
             role=payload.role,
+            user_id=current_user.id,
         )
     except Exception as exc:  # noqa: BLE001 - LLM unreachable/misconfigured
         raise HTTPException(status_code=503, detail="Could not start the interview right now.") from exc
@@ -159,19 +171,25 @@ def create_interview(
 
 
 @router.get("/{session_id}")
-def get_interview(session_id: str, db: Session = Depends(get_db)):
-    return _serialize_session(_get_session_or_404(session_id, db))
+def get_interview(
+    session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    return _serialize_session(_get_session_or_404(session_id, current_user.id, db))
 
 
 @router.get("/{session_id}/transcript")
-def get_transcript(session_id: str, db: Session = Depends(get_db)):
-    session = _get_session_or_404(session_id, db)
+def get_transcript(
+    session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    session = _get_session_or_404(session_id, current_user.id, db)
     return [_serialize_message(m) for m in session.messages]
 
 
 @router.get("/{session_id}/summary")
-def get_summary(session_id: str, db: Session = Depends(get_db)):
-    session = _get_session_or_404(session_id, db)
+def get_summary(
+    session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    session = _get_session_or_404(session_id, current_user.id, db)
     summary = (
         db.query(InterviewSummary).filter(InterviewSummary.session_id == session.id).first()
     )
@@ -186,8 +204,9 @@ def answer_interview(
     payload: SubmitAnswerRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
-    session = _get_session_or_404(session_id, db)
+    session = _get_session_or_404(session_id, current_user.id, db)
 
     text = payload.answer.strip()
     if not text:

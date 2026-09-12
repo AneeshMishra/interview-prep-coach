@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base, get_db
 from app.db.models import Document, InterviewQuestion
 from app.main import app
+from tests.auth_helpers import authenticate, create_user
 
 
 class FakeLLM:
@@ -45,7 +46,10 @@ def client_factory(tmp_path, monkeypatch):
         TestingSession = sessionmaker(bind=engine)
         session = TestingSession()
 
-        document = Document(filename="sample.docx", content_hash="hash", status="done")
+        user_id = create_user(session).id
+        document = Document(
+            user_id=user_id, filename="sample.docx", content_hash="hash", status="done"
+        )
         session.add(document)
         session.commit()
 
@@ -79,7 +83,9 @@ def client_factory(tmp_path, monkeypatch):
         monkeypatch.setattr("app.api.routers.chat.get_vector_store", lambda: fake_vector_store)
         monkeypatch.setattr("app.api.routers.chat.get_llm_provider", lambda settings: fake_llm)
 
-        return TestClient(app), question_id, fake_vector_store, fake_llm
+        client = TestClient(app)
+        authenticate(client, user_id)
+        return client, question_id, fake_vector_store, fake_llm
 
     yield make
     app.dependency_overrides.clear()
@@ -174,6 +180,7 @@ def test_no_matching_candidates_gives_a_plain_no_results_answer_without_calling_
 
     try:
         client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
         session = client.post("/api/v1/chat/sessions").json()
         response = client.post(
             f"/api/v1/chat/sessions/{session['id']}/messages", json={"message": "anything"}
@@ -206,6 +213,7 @@ def test_vector_store_failure_returns_503(tmp_path, monkeypatch):
 
     try:
         client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
         session = client.post("/api/v1/chat/sessions").json()
         response = client.post(
             f"/api/v1/chat/sessions/{session['id']}/messages", json={"message": "anything"}

@@ -11,10 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.chat.rag import ChatCandidate, RETRIEVAL_LIMIT, answer_chat_message
 from app.config import Settings, get_settings
 from app.db.base import get_db
-from app.db.models import ChatMessage, ChatSession, InterviewQuestion
+from app.db.models import ChatMessage, ChatSession, Document, InterviewQuestion, User
 from app.llm_providers.factory import get_llm_provider
 from app.retrieval.vector_store import get_vector_store
 
@@ -42,16 +43,20 @@ def _serialize_message(message: ChatMessage) -> dict:
     }
 
 
-def _get_session_or_404(session_id: str, db: Session) -> ChatSession:
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+def _get_session_or_404(session_id: str, user_id: str, db: Session) -> ChatSession:
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .first()
+    )
     if session is None:
         raise HTTPException(status_code=404, detail="Chat session not found.")
     return session
 
 
 @router.post("/sessions")
-def create_session(db: Session = Depends(get_db)):
-    session = ChatSession()
+def create_session(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    session = ChatSession(user_id=current_user.id)
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -59,8 +64,10 @@ def create_session(db: Session = Depends(get_db)):
 
 
 @router.get("/sessions/{session_id}/messages")
-def list_messages(session_id: str, db: Session = Depends(get_db)):
-    session = _get_session_or_404(session_id, db)
+def list_messages(
+    session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    session = _get_session_or_404(session_id, current_user.id, db)
     return [_serialize_message(m) for m in session.messages]
 
 
@@ -70,8 +77,9 @@ def send_message(
     payload: SendMessageRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
-    session = _get_session_or_404(session_id, db)
+    session = _get_session_or_404(session_id, current_user.id, db)
 
     text = payload.message.strip()
     if not text:
@@ -96,7 +104,13 @@ def send_message(
 
     question_ids = [hit.question_id for hit in hits]
     questions_by_id = (
-        {q.id: q for q in db.query(InterviewQuestion).filter(InterviewQuestion.id.in_(question_ids)).all()}
+        {
+            q.id: q
+            for q in db.query(InterviewQuestion)
+            .join(Document)
+            .filter(InterviewQuestion.id.in_(question_ids), Document.user_id == current_user.id)
+            .all()
+        }
         if question_ids
         else {}
     )

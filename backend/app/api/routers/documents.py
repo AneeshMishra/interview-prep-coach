@@ -14,9 +14,10 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Backgro
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.config import Settings, get_settings
 from app.db.base import get_db
-from app.db.models import Document
+from app.db.models import Document, User
 from app.ingestion.docx_parser import content_hash
 from app.ingestion.google_docs_import import (
     GoogleDocNotAccessible,
@@ -58,18 +59,23 @@ async def _save_upload_within_limit(file: UploadFile, max_bytes: int) -> Path:
 def _register_document_and_start_ingestion(
     tmp_path: Path,
     filename: str,
+    user_id: str,
     db: Session,
     background_tasks: BackgroundTasks,
 ) -> dict:
     file_bytes = tmp_path.read_bytes()
     doc_hash = content_hash(file_bytes)
 
-    existing = db.query(Document).filter(Document.content_hash == doc_hash).first()
+    existing = (
+        db.query(Document)
+        .filter(Document.user_id == user_id, Document.content_hash == doc_hash)
+        .first()
+    )
     if existing:
         tmp_path.unlink(missing_ok=True)
         return {"document_id": existing.id, "status": "duplicate", "detail": "Already ingested."}
 
-    document = Document(filename=filename, content_hash=doc_hash, status="pending")
+    document = Document(user_id=user_id, filename=filename, content_hash=doc_hash, status="pending")
     db.add(document)
     db.commit()
     db.refresh(document)
@@ -85,6 +91,7 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
     # Sanitize: take only the basename, so a crafted filename (e.g. a path
     # traversal attempt) can never escape the intended upload directory or
@@ -94,7 +101,9 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Only .docx files are supported in v1.")
 
     tmp_path = await _save_upload_within_limit(file, settings.max_upload_size_bytes)
-    return _register_document_and_start_ingestion(tmp_path, safe_filename, db, background_tasks)
+    return _register_document_and_start_ingestion(
+        tmp_path, safe_filename, current_user.id, db, background_tasks
+    )
 
 
 @router.post("/import/google-doc")
@@ -103,6 +112,7 @@ async def import_google_doc(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
     doc_id = extract_google_doc_id(payload.url)
     if not doc_id:
@@ -129,9 +139,11 @@ async def import_google_doc(
     # which is a valid URL path segment but not a valid filename character.
     fallback_name = f"google-doc-{doc_id.replace('/', '-')}.docx"
     safe_filename = sanitize_docx_filename(exported_filename) or fallback_name
-    return _register_document_and_start_ingestion(tmp_path, safe_filename, db, background_tasks)
+    return _register_document_and_start_ingestion(
+        tmp_path, safe_filename, current_user.id, db, background_tasks
+    )
 
 
 @router.get("")
-def list_documents(db: Session = Depends(get_db)):
-    return db.query(Document).all()
+def list_documents(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return db.query(Document).filter(Document.user_id == current_user.id).all()

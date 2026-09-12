@@ -72,3 +72,49 @@ export interface ChatMessageRecord {
   cited_question_ids: string[];
   created_at: string;
 }
+
+export type InterviewStatus = "active" | "completed" | "abandoned";
+
+export interface InterviewSessionRecord {
+  id: string;
+  company: string | null;
+  role: string | null;
+  round_type: string;
+  status: InterviewStatus;
+  current_state: string;
+  rubric_version: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export type InterviewMessageRole = "interviewer" | "candidate";
+
+export interface InterviewMessageRecord {
+  id: string;
+  session_id: string;
+  sequence_no: number;
+  role: InterviewMessageRole;
+  content: string;
+  question_id: string | null;
+  created_at: string;
+}
+
+export interface InterviewSummaryRecord {
+  session_id: string;
+  overall_score: number;
+  strengths: string[];
+  weaknesses: string[];
+  recommendations: string[];
+  created_at: string;
+}
+
+export type InterviewTurnResult =
+  | { type: "message"; message: InterviewMessageRecord }
+  | { type: "summary"; summary: InterviewSummaryRecord };
+
+export interface StartInterviewResponse {
+  session: InterviewSessionRecord;
+  type: "message" | "summary";
+  message?: InterviewMessageRecord;
+  summary?: InterviewSummaryRecord;
+}

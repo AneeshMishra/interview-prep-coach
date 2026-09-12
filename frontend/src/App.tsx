@@ -4,6 +4,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { QuestionExplorerPage } from "./pages/QuestionExplorerPage";
 import { QuestionDetailPage } from "./pages/QuestionDetailPage";
 import { ChatPage } from "./pages/ChatPage";
+import { InterviewPage } from "./pages/InterviewPage";
 
 export function App() {
   return (
@@ -15,6 +16,7 @@ export function App() {
           <Route path="/questions" element={<QuestionExplorerPage />} />
           <Route path="/questions/:questionId" element={<QuestionDetailPage />} />
           <Route path="/chat" element={<ChatPage />} />
+          <Route path="/interview" element={<InterviewPage />} />
         </Routes>
       </main>
     </div>

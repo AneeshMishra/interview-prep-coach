@@ -27,10 +27,13 @@ from app.ingestion.google_docs_import import (
     sanitize_docx_filename,
 )
 from app.ingestion.pipeline import run_ingestion
+from app.rate_limit import get_upload_rate_limiter, rate_limit_by_user
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+_upload_rate_limit = rate_limit_by_user(get_upload_rate_limiter)
 
 
 class ImportGoogleDocRequest(BaseModel):
@@ -85,7 +88,7 @@ def _register_document_and_start_ingestion(
     return {"document_id": document.id, "status": document.status}
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(_upload_rate_limit)])
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
@@ -106,7 +109,7 @@ async def upload_document(
     )
 
 
-@router.post("/import/google-doc")
+@router.post("/import/google-doc", dependencies=[Depends(_upload_rate_limit)])
 async def import_google_doc(
     payload: ImportGoogleDocRequest,
     background_tasks: BackgroundTasks,

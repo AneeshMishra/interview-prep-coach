@@ -4,9 +4,10 @@ A local-first, open-source AI interview preparation coach. Upload past interview
 documents (`.docx`), turn them into a searchable knowledge base, and run stateful mock
 interviews graded against configurable rubrics.
 
-> **Status:** Phase 1 in progress — document ingestion, retrieval, and the
-> question explorer UI are working end to end. Mock interviews are Phase 2.
-> See [docs/architecture.md](docs/architecture.md) for the full V1.1 design.
+> **Status:** Phase 1 (ingestion, retrieval, question explorer) and the
+> Phase 2 core (Q&A chat, mock interviews, multi-user auth, chat/interview
+> history) are working end to end. See
+> [docs/architecture.md](docs/architecture.md) for the full V1.1 design.
 
 ## Core idea
 
@@ -38,8 +39,41 @@ interview workflow state. The LLM never becomes the database or the workflow eng
 ```bash
 git clone <repo-url>
 cd interview-prep-coach
+cp .env.example .env    # then fill in the Google OAuth values — see below
 docker compose up
 ```
+
+Every route in the app requires signing in, so `docker compose up` will start but the
+app itself won't be usable until Google sign-in is configured (next section). Compose
+fails fast with a clear error if `.env` doesn't exist at all, rather than starting with
+an unconfigured, silently-broken login.
+
+## Authentication setup
+
+Sign-in is always via an external OAuth provider — there's no local password. Google is
+the only provider implemented so far (Facebook, LinkedIn and Azure AD SSO are planned;
+see `backend/app/auth/oauth/factory.py`).
+
+1. Go to the [Google Cloud Console credentials page](https://console.cloud.google.com/apis/credentials)
+   and create an **OAuth client ID** of type **Web application** (create a project first
+   if you don't have one).
+2. Under **Authorized redirect URIs**, add exactly:
+   `http://localhost:8000/api/v1/auth/google/callback`
+   (this must match `IPC_GOOGLE_OAUTH_REDIRECT_URI` in your `.env` — the default already
+   matches the Docker Compose and local-dev backend port).
+3. Copy the generated **Client ID** and **Client secret** into your `.env`:
+   ```
+   IPC_GOOGLE_CLIENT_ID=...
+   IPC_GOOGLE_CLIENT_SECRET=...
+   ```
+4. Also set a real `IPC_JWT_SECRET_KEY` outside local dev — the checked-in default is
+   intentionally insecure. Generate one with:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(48))"
+   ```
+
+See `.env.example` for every other setting (LLM provider, embeddings, CORS, upload
+limits) with inline comments.
 
 ## Development order (Phase 1 first)
 
@@ -62,10 +96,16 @@ questions by company/role/round, with provenance.
 
 ```bash
 cd backend
+cp ../.env.example .env    # pydantic-settings reads .env relative to this directory
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
+
+For local (non-Docker) dev, also change `IPC_QDRANT_URL`/`IPC_OLLAMA_BASE_URL` in
+`backend/.env` back to `http://localhost:...` (the `qdrant`/`ollama` hostnames in
+`.env.example` only resolve inside the Docker Compose network) and set
+`IPC_FRONTEND_BASE_URL=http://localhost:5173` to match the Vite dev server.
 
 ## Local frontend setup
 

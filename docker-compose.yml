@@ -1,10 +1,18 @@
-version: "3.9"
-
 services:
   backend:
     build: ./backend
     ports:
       - "8000:8000"
+    # User-configurable settings (auth secrets, Google OAuth credentials,
+    # LLM provider choice, API keys, ...) — see .env.example. Copy it to
+    # .env before running `docker compose up`; compose fails fast if that
+    # file is missing rather than silently starting with an unconfigured,
+    # unusable login.
+    env_file:
+      - .env
+    # These three must always point at the other containers by service
+    # name, never at whatever a developer's .env has for local (non-Docker)
+    # use — env vars listed here override the same keys from env_file.
     environment:
       - IPC_DATABASE_URL=sqlite:////data/interview_prep.db
       - IPC_QDRANT_URL=http://qdrant:6333

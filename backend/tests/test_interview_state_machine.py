@@ -69,6 +69,19 @@ def summary_response():
     )
 
 
+def scored_response(criteria_scores):
+    return json.dumps(
+        {
+            "criteria_scores": criteria_scores,
+            "strengths": [],
+            "weaknesses": [],
+            "feedback": "ok",
+            "ask_follow_up": False,
+            "follow_up_question": None,
+        }
+    )
+
+
 @pytest.fixture
 def db_session(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'test.db'}")
@@ -250,3 +263,68 @@ def test_overall_score_is_computed_by_app_not_trusted_from_llm(db_session, rubri
     assert isinstance(result, InterviewCompleted)
     # (4+4+4+2)/4 = 3.5 — a plain average of the app-computed weighted scores.
     assert result.summary.overall_score == pytest.approx(3.5)
+
+
+def test_summary_includes_a_per_criterion_score_breakdown(db_session, rubric, user_id):
+    seed_question(db_session, user_id, question="Q1")
+    seed_question(db_session, user_id, question="Q2")
+    seed_question(db_session, user_id, question="Q3")
+    seed_question(db_session, user_id, question="Q4")
+
+    start_interview(
+        db=db_session, llm=ScriptedLLM([]), llm_provider_name="ollama", llm_model="llama3",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
+    )
+    session = db_session.query(InterviewSession).first()
+
+    all_criteria = list(rubric.criteria)
+    # Every criterion scores a flat 3 except "architecture", which varies
+    # per answer — proves each criterion is averaged independently, not
+    # just echoing the overall score.
+    architecture_scores = [5, 3, 4, 4]  # average 4.0
+    responses = [
+        scored_response({**{c: 3 for c in all_criteria}, "architecture": s})
+        for s in architecture_scores
+    ]
+    responses.append(summary_response())
+    llm = ScriptedLLM(responses)
+
+    result = None
+    for i in range(MAX_QUESTIONS):
+        result = submit_answer(db=db_session, session=session, answer_text=f"a{i}", llm=llm, rubric=rubric)
+
+    assert isinstance(result, InterviewCompleted)
+    breakdown = result.summary.criteria_breakdown_json
+    assert breakdown["architecture"] == pytest.approx(4.0)
+    assert breakdown["communication"] == pytest.approx(3.0)
+    # Every rubric criterion was scored on every answer here, so all of
+    # them appear, in the rubric's own definition order.
+    assert list(breakdown.keys()) == all_criteria
+
+
+def test_summary_omits_a_criterion_the_llm_never_scored_on_any_answer(db_session, rubric, user_id):
+    seed_question(db_session, user_id, question="Q1")
+    seed_question(db_session, user_id, question="Q2")
+    seed_question(db_session, user_id, question="Q3")
+    seed_question(db_session, user_id, question="Q4")
+
+    start_interview(
+        db=db_session, llm=ScriptedLLM([]), llm_provider_name="ollama", llm_model="llama3",
+        rubric=rubric, company="Amazon", role="Backend Engineer", user_id=user_id,
+    )
+    session = db_session.query(InterviewSession).first()
+
+    # "security" is left out of every single answer's criteria_scores —
+    # matching evaluate_answer's own behavior when the LLM's JSON omits it.
+    scores_without_security = {c: 3 for c in rubric.criteria if c != "security"}
+    responses = [scored_response(scores_without_security) for _ in range(MAX_QUESTIONS)]
+    responses.append(summary_response())
+    llm = ScriptedLLM(responses)
+
+    result = None
+    for i in range(MAX_QUESTIONS):
+        result = submit_answer(db=db_session, session=session, answer_text=f"a{i}", llm=llm, rubric=rubric)
+
+    assert isinstance(result, InterviewCompleted)
+    assert "security" not in result.summary.criteria_breakdown_json
+    assert "architecture" in result.summary.criteria_breakdown_json

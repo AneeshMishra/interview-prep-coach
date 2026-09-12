@@ -162,6 +162,10 @@ class InterviewSummary(Base):
     id = Column(String, primary_key=True, default=gen_uuid)
     session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False)
     overall_score = Column(Float, nullable=True)
+    # Per-criterion average across the session's evaluations — see
+    # Rubric.average_criteria(). A criterion never scored on any answer is
+    # simply absent from this dict, not defaulted to a fabricated value.
+    criteria_breakdown_json = Column(JSON, nullable=True)
     strengths_json = Column(JSON, nullable=True)
     weaknesses_json = Column(JSON, nullable=True)
     recommendations_json = Column(JSON, nullable=True)

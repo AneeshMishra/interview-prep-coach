@@ -114,6 +114,10 @@ export interface InterviewMessageRecord {
 export interface InterviewSummaryRecord {
   session_id: string;
   overall_score: number;
+  // Average score per rubric criterion (e.g. "architecture", "scalability")
+  // across the session's answers. A criterion never scored on any answer
+  // is simply absent here, not defaulted to a fabricated value.
+  criteria_breakdown: Record<string, number>;
   strengths: string[];
   weaknesses: string[];
   recommendations: string[];

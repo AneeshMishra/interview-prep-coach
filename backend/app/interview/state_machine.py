@@ -211,7 +211,7 @@ def submit_answer(
         return AskedQuestion(message=next_message)
 
     if questions_asked_count >= MAX_QUESTIONS:
-        summary = _generate_summary(db, session, llm)
+        summary = _generate_summary(db, session, llm, rubric)
         session.status = "completed"
         session.current_state = "COMPLETED"
         session.completed_at = datetime.utcnow()
@@ -242,9 +242,12 @@ def submit_answer(
     return AskedQuestion(message=next_message)
 
 
-def _generate_summary(db: Session, session: InterviewSession, llm: LLMProvider) -> InterviewSummary:
+def _generate_summary(
+    db: Session, session: InterviewSession, llm: LLMProvider, rubric: Rubric
+) -> InterviewSummary:
     evaluations = db.query(Evaluation).filter(Evaluation.session_id == session.id).all()
     overall_score = sum(e.score for e in evaluations) / len(evaluations) if evaluations else 0.0
+    criteria_breakdown = rubric.average_criteria([e.criteria_json or {} for e in evaluations])
 
     transcript_lines = [f"{m.role}: {m.content}" for m in session.messages]
     evaluation_lines = [
@@ -260,6 +263,7 @@ def _generate_summary(db: Session, session: InterviewSession, llm: LLMProvider) 
     summary = InterviewSummary(
         session_id=session.id,
         overall_score=overall_score,
+        criteria_breakdown_json=criteria_breakdown,
         strengths_json=result.strengths,
         weaknesses_json=result.weaknesses,
         recommendations_json=result.recommendations,

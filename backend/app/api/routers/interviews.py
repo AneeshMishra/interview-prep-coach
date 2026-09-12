@@ -63,6 +63,7 @@ def _serialize_summary(summary: InterviewSummary) -> dict:
     return {
         "session_id": summary.session_id,
         "overall_score": summary.overall_score,
+        "criteria_breakdown": summary.criteria_breakdown_json or {},
         "strengths": summary.strengths_json or [],
         "weaknesses": summary.weaknesses_json or [],
         "recommendations": summary.recommendations_json or [],

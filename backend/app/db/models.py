@@ -75,6 +75,10 @@ class InterviewSession(Base):
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
+    messages = relationship(
+        "InterviewMessage", back_populates="session", order_by="InterviewMessage.sequence_no"
+    )
+
 
 class InterviewMessage(Base):
     __tablename__ = "interview_messages"
@@ -86,6 +90,8 @@ class InterviewMessage(Base):
     content = Column(Text, nullable=False)
     question_id = Column(String, ForeignKey("interview_questions.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("InterviewSession", back_populates="messages")
 
 
 class Evaluation(Base):

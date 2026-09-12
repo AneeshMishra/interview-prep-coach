@@ -13,11 +13,36 @@ from tests.auth_helpers import authenticate, create_user
 
 
 class FakeLLM:
-    def __init__(self, response):
+    def __init__(self, response, stream_chunks=None):
         self.response = response
+        # If unset, stream() just yields the whole response as one chunk —
+        # enough to exercise the SSE machinery without needing every test
+        # to care about chunk boundaries (those are covered directly in
+        # test_answer_stream_extractor.py).
+        self.stream_chunks = stream_chunks
 
     def complete(self, system_prompt, user_prompt):
         return self.response
+
+    def stream(self, system_prompt, user_prompt):
+        for chunk in self.stream_chunks if self.stream_chunks is not None else [self.response]:
+            yield chunk
+
+
+def parse_sse_events(text: str) -> list[tuple[str, dict]]:
+    events = []
+    for frame in text.strip().split("\n\n"):
+        if not frame:
+            continue
+        event_name = "message"
+        data = None
+        for line in frame.split("\n"):
+            if line.startswith("event:"):
+                event_name = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                data = json.loads(line[len("data:"):].strip())
+        events.append((event_name, data))
+    return events
 
 
 class FakeVectorStore:
@@ -151,6 +176,126 @@ def test_multi_turn_conversation_increments_sequence(client_factory):
     history = client.get(f"/api/v1/chat/sessions/{session['id']}/messages").json()
     assert [m["role"] for m in history] == ["user", "assistant", "user", "assistant"]
     assert [m["content"] for m in history if m["role"] == "user"] == ["first", "second"]
+
+
+def test_stream_endpoint_emits_chunks_then_a_done_and_message_event(client_factory):
+    client, question_id, fake_vector_store, fake_llm = client_factory(None, "{}")
+    fake_llm.stream_chunks = [
+        '{"answer": "Virtual threads ',
+        'are JVM-scheduled."',
+        f', "cited_question_ids": ["{question_id}"]}}',
+    ]
+    session = client.post("/api/v1/chat/sessions").json()
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session['id']}/messages/stream",
+        json={"message": "What is a virtual thread?"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = parse_sse_events(response.text)
+    chunk_texts = [data["text"] for name, data in events if name == "chunk"]
+    assert "".join(chunk_texts) == "Virtual threads are JVM-scheduled."
+
+    done_events = [data for name, data in events if name == "done"]
+    assert done_events == [
+        {"answer": "Virtual threads are JVM-scheduled.", "cited_question_ids": [question_id]}
+    ]
+
+    message_events = [data for name, data in events if name == "message"]
+    assert len(message_events) == 1
+    assert message_events[0]["role"] == "assistant"
+    assert message_events[0]["content"] == "Virtual threads are JVM-scheduled."
+    assert message_events[0]["cited_question_ids"] == [question_id]
+
+    # The streamed answer must actually be persisted, same as the
+    # non-streaming endpoint.
+    history = client.get(f"/api/v1/chat/sessions/{session['id']}/messages").json()
+    assert [m["role"] for m in history] == ["user", "assistant"]
+    assert history[1]["content"] == "Virtual threads are JVM-scheduled."
+
+
+def test_stream_endpoint_with_no_candidates_skips_the_llm_entirely(tmp_path, monkeypatch):
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=engine)
+    TestingSession = sessionmaker(bind=engine)
+
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    class NoHitsVectorStore:
+        def search(self, query, company=None, role=None, round_type=None, limit=20):
+            return []
+
+    class ExplodingLLM:
+        def stream(self, system_prompt, user_prompt):
+            raise AssertionError("LLM should not be called when there are no candidates")
+
+    monkeypatch.setattr("app.api.routers.chat.get_vector_store", lambda: NoHitsVectorStore())
+    monkeypatch.setattr("app.api.routers.chat.get_llm_provider", lambda settings: ExplodingLLM())
+
+    try:
+        client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
+        session = client.post("/api/v1/chat/sessions").json()
+        response = client.post(
+            f"/api/v1/chat/sessions/{session['id']}/messages/stream", json={"message": "anything"}
+        )
+        events = parse_sse_events(response.text)
+
+        assert [name for name, _ in events if name == "chunk"] == []
+        done_data = next(data for name, data in events if name == "done")
+        assert "couldn't find anything relevant" in done_data["answer"].lower()
+        assert done_data["cited_question_ids"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_stream_endpoint_emits_error_event_when_llm_fails_mid_stream(client_factory):
+    client, *_, fake_llm = client_factory(None, "{}")
+
+    def exploding_stream(system_prompt, user_prompt):
+        yield '{"answer": "partial'
+        raise ConnectionError("connection refused")
+
+    fake_llm.stream = exploding_stream
+    session = client.post("/api/v1/chat/sessions").json()
+
+    response = client.post(
+        f"/api/v1/chat/sessions/{session['id']}/messages/stream", json={"message": "anything"}
+    )
+    events = parse_sse_events(response.text)
+
+    assert [name for name, _ in events] == ["chunk", "error"]
+    assert "could not generate an answer" in events[1][1]["detail"].lower()
+
+    # Nothing should have been persisted for a stream that errored out.
+    history = client.get(f"/api/v1/chat/sessions/{session['id']}/messages").json()
+    assert [m["role"] for m in history] == ["user"]
+
+
+def test_stream_endpoint_to_unknown_session_returns_404(client_factory):
+    client, *_ = client_factory(None, "{}")
+    response = client.post(
+        "/api/v1/chat/sessions/does-not-exist/messages/stream", json={"message": "hi"}
+    )
+    assert response.status_code == 404
+
+
+def test_stream_endpoint_rejects_empty_message(client_factory):
+    client, *_ = client_factory(None, "{}")
+    session = client.post("/api/v1/chat/sessions").json()
+    response = client.post(
+        f"/api/v1/chat/sessions/{session['id']}/messages/stream", json={"message": "   "}
+    )
+    assert response.status_code == 400
 
 
 def test_no_matching_candidates_gives_a_plain_no_results_answer_without_calling_llm(tmp_path, monkeypatch):

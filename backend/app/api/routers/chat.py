@@ -36,9 +36,12 @@ from app.db.base import get_db
 from app.db.models import ChatMessage, ChatSession, Document, InterviewQuestion, User
 from app.llm_providers.base import LLMProvider
 from app.llm_providers.factory import get_llm_provider
+from app.rate_limit import get_llm_rate_limiter, rate_limit_by_user
 from app.retrieval.vector_store import get_vector_store
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+_llm_rate_limit = rate_limit_by_user(get_llm_rate_limiter)
 
 # Most-recent user/assistant turns included as conversational context for
 # the LLM. Retrieval itself uses only the latest message (see rag.py) —
@@ -213,7 +216,7 @@ def _prepare_message(
     return session, text, next_seq, history, candidates
 
 
-@router.post("/sessions/{session_id}/messages")
+@router.post("/sessions/{session_id}/messages", dependencies=[Depends(_llm_rate_limit)])
 def send_message(
     session_id: str,
     payload: SendMessageRequest,
@@ -280,7 +283,7 @@ def _generate_answer_events(
     yield "done", {"answer": result.answer, "cited_question_ids": result.cited_question_ids}
 
 
-@router.post("/sessions/{session_id}/messages/stream")
+@router.post("/sessions/{session_id}/messages/stream", dependencies=[Depends(_llm_rate_limit)])
 def send_message_stream(
     session_id: str,
     payload: SendMessageRequest,

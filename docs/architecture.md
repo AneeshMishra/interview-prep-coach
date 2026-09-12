@@ -837,6 +837,27 @@ independent knowledge bases, not a duplicate of each other.
 
 ---
 
+## ADR-012 — In-Memory Rate Limiting for Auth, Upload and LLM-Calling Endpoints
+
+**Status:** Accepted
+
+**Decision:** A small per-process fixed-window counter (`backend/app/rate_limit.py`) guards three
+categories of endpoint: OAuth login/callback/refresh (keyed by client IP — no user exists yet),
+and document upload/Google-Doc import plus every LLM-calling endpoint — chat messages and mock
+interviews (both keyed by signed-in user, sharing one combined per-user LLM-usage bucket since
+both draw on the same underlying cost). Limits are configured via `Settings`
+(`IPC_RATE_LIMIT_*`), applied as ordinary FastAPI dependencies, and exceeding one returns `429`
+with a `Retry-After` header.
+
+**Reason:** Consistent with ADR-011 and CLAUDE.md's "Redis is deferred": rate-limit counters are a
+transient abuse guard, not state that needs to survive a restart or be shared across replicas, so
+an in-memory counter is the right fit — unlike sessions, which must never live only in a process
+dict. Keying per-user rather than per-IP for authenticated endpoints avoids one abusive account
+hiding behind a shared NAT, and avoids unrelated users on that same IP being penalized for
+someone else's activity.
+
+---
+
 # 18. Repository Structure
 
 ```text

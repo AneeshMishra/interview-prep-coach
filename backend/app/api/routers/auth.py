@@ -23,8 +23,12 @@ from app.auth.oauth.factory import ProviderNotConfiguredError, UnsupportedProvid
 from app.config import Settings, get_settings
 from app.db.base import get_db
 from app.db.models import OAuthAccount, User
+from app.rate_limit import get_auth_rate_limiter, rate_limit_by_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# IP-keyed: none of these endpoints have an authenticated user yet.
+_auth_rate_limit = rate_limit_by_ip(get_auth_rate_limiter)
 
 STATE_COOKIE = "oauth_state"
 STATE_COOKIE_MAX_AGE_SECONDS = 10 * 60
@@ -82,7 +86,7 @@ def _find_or_create_user(db: Session, provider: str, info) -> User:
     return user
 
 
-@router.get("/{provider}/login")
+@router.get("/{provider}/login", dependencies=[Depends(_auth_rate_limit)])
 def login(provider: str, settings: Settings = Depends(get_settings)):
     try:
         oauth_provider = get_oauth_provider(provider, settings)
@@ -104,7 +108,7 @@ def login(provider: str, settings: Settings = Depends(get_settings)):
     return response
 
 
-@router.get("/{provider}/callback")
+@router.get("/{provider}/callback", dependencies=[Depends(_auth_rate_limit)])
 async def callback(
     provider: str,
     code: str | None = None,
@@ -149,7 +153,7 @@ def logout():
     return response
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=[Depends(_auth_rate_limit)])
 def refresh(
     refresh_token: str | None = Cookie(default=None, alias=REFRESH_TOKEN_COOKIE),
     db: Session = Depends(get_db),

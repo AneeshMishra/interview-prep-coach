@@ -62,6 +62,17 @@ class Settings(BaseSettings):
     google_client_secret: str | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
 
+    # Rate limiting (app/rate_limit.py) — in-memory, per-process counters;
+    # Redis is deferred, and these are transient abuse guards rather than
+    # state that needs to survive a restart. Auth is keyed by IP (no user
+    # yet); uploads and LLM-calling endpoints are keyed per signed-in user.
+    rate_limit_auth_max: int = 10
+    rate_limit_auth_window_seconds: int = 60
+    rate_limit_upload_max: int = 10
+    rate_limit_upload_window_seconds: int = 60
+    rate_limit_llm_max: int = 20
+    rate_limit_llm_window_seconds: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -30,8 +30,11 @@ from app.interview.state_machine import (
     submit_answer,
 )
 from app.llm_providers.factory import get_llm_provider
+from app.rate_limit import get_llm_rate_limiter, rate_limit_by_user
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
+
+_llm_rate_limit = rate_limit_by_user(get_llm_rate_limiter)
 
 
 class StartInterviewRequest(BaseModel):
@@ -130,7 +133,7 @@ def list_interviews(
     ]
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(_llm_rate_limit)])
 def create_interview(
     payload: StartInterviewRequest,
     db: Session = Depends(get_db),
@@ -198,7 +201,7 @@ def get_summary(
     return _serialize_summary(summary)
 
 
-@router.post("/{session_id}/answers")
+@router.post("/{session_id}/answers", dependencies=[Depends(_llm_rate_limit)])
 def answer_interview(
     session_id: str,
     payload: SubmitAnswerRequest,

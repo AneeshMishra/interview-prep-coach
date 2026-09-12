@@ -14,6 +14,9 @@ export function NavBar() {
         <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : "")}>
           Chat
         </NavLink>
+        <NavLink to="/interview" className={({ isActive }) => (isActive ? "active" : "")}>
+          Mock Interview
+        </NavLink>
       </nav>
     </header>
   );

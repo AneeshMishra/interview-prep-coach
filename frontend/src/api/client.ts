@@ -2,8 +2,13 @@ import type {
   ChatMessageRecord,
   ChatSessionRecord,
   DocumentRecord,
+  InterviewMessageRecord,
+  InterviewSessionRecord,
+  InterviewSummaryRecord,
+  InterviewTurnResult,
   Question,
   QuestionFilters,
+  StartInterviewResponse,
   UploadResponse,
 } from "./types";
 
@@ -86,4 +91,32 @@ export function sendChatMessage(sessionId: string, message: string): Promise<Cha
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message }),
   });
+}
+
+export function startInterview(company: string, role: string): Promise<StartInterviewResponse> {
+  return request<StartInterviewResponse>("/interviews", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company: company || undefined, role: role || undefined }),
+  });
+}
+
+export function submitInterviewAnswer(sessionId: string, answer: string): Promise<InterviewTurnResult> {
+  return request<InterviewTurnResult>(`/interviews/${sessionId}/answers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answer }),
+  });
+}
+
+export function getInterview(sessionId: string): Promise<InterviewSessionRecord> {
+  return request<InterviewSessionRecord>(`/interviews/${sessionId}`);
+}
+
+export function getInterviewTranscript(sessionId: string): Promise<InterviewMessageRecord[]> {
+  return request<InterviewMessageRecord[]>(`/interviews/${sessionId}/transcript`);
+}
+
+export function getInterviewSummary(sessionId: string): Promise<InterviewSummaryRecord> {
+  return request<InterviewSummaryRecord>(`/interviews/${sessionId}/summary`);
 }

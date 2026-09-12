@@ -7,6 +7,7 @@ import { UploadPage } from "./pages/UploadPage";
 import { QuestionExplorerPage } from "./pages/QuestionExplorerPage";
 import { QuestionDetailPage } from "./pages/QuestionDetailPage";
 import { ChatPage } from "./pages/ChatPage";
+import { ChatHistoryPage } from "./pages/ChatHistoryPage";
 import { InterviewPage } from "./pages/InterviewPage";
 import { InterviewHistoryPage } from "./pages/InterviewHistoryPage";
 import { InterviewDetailPage } from "./pages/InterviewDetailPage";
@@ -45,6 +46,22 @@ export function App() {
             />
             <Route
               path="/chat"
+              element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chats"
+              element={
+                <ProtectedRoute>
+                  <ChatHistoryPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chats/:sessionId"
               element={
                 <ProtectedRoute>
                   <ChatPage />

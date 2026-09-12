@@ -120,6 +120,19 @@ def test_chat_session_is_not_reachable_by_a_different_user(two_users_client):
     assert response.status_code == 404
 
 
+def test_chat_session_list_excludes_other_users_sessions(two_users_client):
+    client, alice_id, bob_id, _, _ = two_users_client
+
+    authenticate(client, alice_id)
+    client.post("/api/v1/chat/sessions")
+
+    authenticate(client, bob_id)
+    assert client.get("/api/v1/chat/sessions").json() == []
+
+    authenticate(client, alice_id)
+    assert len(client.get("/api/v1/chat/sessions").json()) == 1
+
+
 def test_interview_session_is_not_reachable_by_a_different_user(two_users_client, monkeypatch):
     client, alice_id, bob_id, _, _ = two_users_client
 

@@ -1,4 +1,5 @@
 import type {
+  ChatHistoryEntry,
   ChatMessageRecord,
   ChatSessionRecord,
   DocumentRecord,
@@ -88,6 +89,10 @@ export function getQuestion(questionId: string): Promise<Question> {
 
 export function createChatSession(): Promise<ChatSessionRecord> {
   return request<ChatSessionRecord>("/chat/sessions", { method: "POST" });
+}
+
+export function listChatSessions(): Promise<ChatHistoryEntry[]> {
+  return request<ChatHistoryEntry[]>("/chat/sessions");
 }
 
 export function listChatMessages(sessionId: string): Promise<ChatMessageRecord[]> {

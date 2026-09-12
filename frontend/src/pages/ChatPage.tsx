@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { ApiError, createChatSession, listChatMessages, sendChatMessage } from "../api/client";
 import type { ChatMessageRecord } from "../api/types";
 import { ErrorMessage, Loading } from "../components/StatusStates";
 
 export function ChatPage() {
+  // /chat starts a brand-new conversation; /chats/:sessionId resumes one
+  // from history — same page, just a different way to obtain a session id.
+  const { sessionId: resumeSessionId } = useParams<{ sessionId?: string }>();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [draft, setDraft] = useState("");
@@ -15,7 +18,15 @@ export function ChatPage() {
 
   useEffect(() => {
     let cancelled = false;
-    createChatSession()
+    setSessionId(null);
+    setMessages([]);
+    setInitError(null);
+
+    const ready = resumeSessionId
+      ? Promise.resolve({ id: resumeSessionId })
+      : createChatSession();
+
+    ready
       .then(async (session) => {
         if (cancelled) return;
         setSessionId(session.id);
@@ -24,13 +35,19 @@ export function ChatPage() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setInitError(err instanceof ApiError ? err.message : "Failed to start a chat session.");
+          setInitError(
+            err instanceof ApiError
+              ? err.message
+              : resumeSessionId
+                ? "Failed to load this chat."
+                : "Failed to start a chat session."
+          );
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resumeSessionId]);
 
   useEffect(() => {
     // Optional chaining on the call itself, not just `.current` — jsdom
@@ -70,11 +87,18 @@ export function ChatPage() {
 
   return (
     <section className="chat-page">
-      <h1>Ask the Knowledge Base</h1>
-      <p className="page-subtitle">
-        Ask about your past interview experiences in plain language — answers are grounded only
-        in questions you've actually uploaded, with links back to the source.
-      </p>
+      <div className="page-header-row">
+        <div>
+          <h1>Ask the Knowledge Base</h1>
+          <p className="page-subtitle">
+            Ask about your past interview experiences in plain language — answers are grounded
+            only in questions you've actually uploaded, with links back to the source.
+          </p>
+        </div>
+        <Link to="/chats" className="page-header-row__link">
+          Past Chats →
+        </Link>
+      </div>
 
       {initError && <ErrorMessage message={initError} />}
 

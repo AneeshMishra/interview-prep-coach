@@ -73,6 +73,14 @@ export interface ChatMessageRecord {
   created_at: string;
 }
 
+export interface ChatHistoryEntry {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  preview: string | null;
+}
+
 export type InterviewStatus = "active" | "completed" | "abandoned";
 
 export interface InterviewSessionRecord {

@@ -19,6 +19,20 @@ from app.llm_providers.factory import get_llm_provider
 from app.retrieval.vector_store import VectorStore, get_vector_store
 
 
+def question_qdrant_metadata(question: InterviewQuestion) -> dict:
+    """Qdrant payload for one question — shared with app/ingestion/reindex.py
+    so a from-scratch reindex produces exactly the same payload shape as
+    ingestion-time indexing does."""
+    return {
+        "company": question.company,
+        "role": question.role,
+        "round_type": question.round_type,
+        "difficulty": question.difficulty,
+        "source_type": question.source_type,
+        "source_document_id": question.document_id,
+    }
+
+
 def run_ingestion(
     document_id: str,
     file_path: str,
@@ -68,14 +82,7 @@ def run_ingestion(
                 vector_store.upsert_question(
                     question_id=question.id,
                     text=question.question,
-                    metadata={
-                        "company": question.company,
-                        "role": question.role,
-                        "round_type": question.round_type,
-                        "difficulty": question.difficulty,
-                        "source_type": question.source_type,
-                        "source_document_id": question.document_id,
-                    },
+                    metadata=question_qdrant_metadata(question),
                 )
 
         document.status = "done"

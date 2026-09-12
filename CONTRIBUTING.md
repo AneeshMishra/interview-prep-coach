@@ -29,6 +29,14 @@ it in `app/llm_providers/factory.py`, and add any provider-specific settings
 (e.g. an API key) to `app/config.py`. See `openai_provider.py` for the
 pattern: plain `httpx` calls to the provider's REST API, no vendor SDK.
 
+## Adding an embedding provider
+
+Implement the `EmbeddingProvider` interface in `app/embeddings/base.py`
+(`embed(texts) -> list[list[float]]` plus a `dimension` property, used to
+size the Qdrant collection) and register it in `app/embeddings/factory.py`.
+`VectorStore` only depends on this interface, never on sentence-transformers
+directly, so a new provider needs no changes there.
+
 ## Adding a rubric
 
 Add a new YAML file under `app/rubrics/` following the schema in
@@ -56,6 +64,20 @@ alembic upgrade head
 ```
 
 To roll back one revision: `alembic downgrade -1`.
+
+## Rebuilding the Qdrant index
+
+Qdrant is a retrieval index, not the source of truth (ADR-002) — it must
+always be reconstructable from the relational database alone. If it's
+wiped, moved, or you change the embedding model:
+
+```bash
+cd backend
+python -m app.ingestion.reindex
+```
+
+This re-upserts every persisted question. It does not touch the
+relational DB.
 
 ## Running tests
 

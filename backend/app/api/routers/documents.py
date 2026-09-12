@@ -1,24 +1,39 @@
 """
 POST /documents/upload — accepts a .docx, kicks off ingestion.
+POST /documents/import/google-doc — same, but fetches a publicly-shared
+Google Doc's .docx export instead of taking a file upload.
 
-The full pipeline (parse -> structure -> validate -> persist -> embed ->
-upsert) runs as a background task; see app/ingestion/pipeline.py.
+Both converge on _register_document_and_start_ingestion, and from there
+run the exact same pipeline (parse -> structure -> validate -> persist ->
+embed -> upsert) as a background task; see app/ingestion/pipeline.py.
 """
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.base import get_db
 from app.db.models import Document
 from app.ingestion.docx_parser import content_hash
+from app.ingestion.google_docs_import import (
+    GoogleDocNotAccessible,
+    GoogleDocTooLarge,
+    download_google_doc_as_docx,
+    extract_google_doc_id,
+    sanitize_docx_filename,
+)
 from app.ingestion.pipeline import run_ingestion
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MB
+
+
+class ImportGoogleDocRequest(BaseModel):
+    url: str
 
 
 async def _save_upload_within_limit(file: UploadFile, max_bytes: int) -> Path:
@@ -40,6 +55,30 @@ async def _save_upload_within_limit(file: UploadFile, max_bytes: int) -> Path:
     return tmp_path
 
 
+def _register_document_and_start_ingestion(
+    tmp_path: Path,
+    filename: str,
+    db: Session,
+    background_tasks: BackgroundTasks,
+) -> dict:
+    file_bytes = tmp_path.read_bytes()
+    doc_hash = content_hash(file_bytes)
+
+    existing = db.query(Document).filter(Document.content_hash == doc_hash).first()
+    if existing:
+        tmp_path.unlink(missing_ok=True)
+        return {"document_id": existing.id, "status": "duplicate", "detail": "Already ingested."}
+
+    document = Document(filename=filename, content_hash=doc_hash, status="pending")
+    db.add(document)
+    db.commit()
+    db.refresh(document)
+
+    background_tasks.add_task(run_ingestion, document.id, str(tmp_path), db)
+
+    return {"document_id": document.id, "status": document.status}
+
+
 @router.post("/upload")
 async def upload_document(
     background_tasks: BackgroundTasks,
@@ -55,23 +94,42 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Only .docx files are supported in v1.")
 
     tmp_path = await _save_upload_within_limit(file, settings.max_upload_size_bytes)
+    return _register_document_and_start_ingestion(tmp_path, safe_filename, db, background_tasks)
 
-    file_bytes = tmp_path.read_bytes()
-    doc_hash = content_hash(file_bytes)
 
-    existing = db.query(Document).filter(Document.content_hash == doc_hash).first()
-    if existing:
-        tmp_path.unlink(missing_ok=True)
-        return {"document_id": existing.id, "status": "duplicate", "detail": "Already ingested."}
+@router.post("/import/google-doc")
+async def import_google_doc(
+    payload: ImportGoogleDocRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    doc_id = extract_google_doc_id(payload.url)
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="That doesn't look like a Google Docs document URL.")
 
-    document = Document(filename=safe_filename, content_hash=doc_hash, status="pending")
-    db.add(document)
-    db.commit()
-    db.refresh(document)
+    try:
+        tmp_path, exported_filename = await download_google_doc_as_docx(
+            doc_id, settings.max_upload_size_bytes
+        )
+    except GoogleDocTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except GoogleDocNotAccessible as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{exc} Make sure the document's sharing is set to "
+                '"Anyone with the link can view", or download it manually '
+                "(File > Download > Microsoft Word (.docx)) and upload that "
+                "file instead."
+            ),
+        ) from exc
 
-    background_tasks.add_task(run_ingestion, document.id, str(tmp_path), db)
-
-    return {"document_id": document.id, "status": document.status}
+    # doc_id may contain "/" for a "Publish to the web" link (e.g. "e/<token>"),
+    # which is a valid URL path segment but not a valid filename character.
+    fallback_name = f"google-doc-{doc_id.replace('/', '-')}.docx"
+    safe_filename = sanitize_docx_filename(exported_filename) or fallback_name
+    return _register_document_and_start_ingestion(tmp_path, safe_filename, db, background_tasks)
 
 
 @router.get("")

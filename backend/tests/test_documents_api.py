@@ -12,6 +12,7 @@ from app.config import Settings, get_settings
 from app.db.base import Base, get_db
 from app.ingestion.google_docs_import import GoogleDocNotAccessible, GoogleDocTooLarge
 from app.main import app
+from tests.auth_helpers import authenticate, create_user
 
 
 class FakeLLM:
@@ -75,6 +76,8 @@ def make_client(tmp_path, monkeypatch):
     monkeypatch.setattr("app.ingestion.pipeline.get_vector_store", lambda: fake_vector_store)
 
     client = TestClient(app)
+    user = create_user(TestingSession())
+    authenticate(client, user.id)
     return client, fake_vector_store
 
 

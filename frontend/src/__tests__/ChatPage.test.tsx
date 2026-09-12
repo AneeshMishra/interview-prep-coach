@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "../pages/ChatPage";
 import type { ChatMessageRecord } from "../api/types";
@@ -37,6 +37,16 @@ function renderPage() {
   return render(
     <MemoryRouter>
       <ChatPage />
+    </MemoryRouter>
+  );
+}
+
+function renderResumedPage(sessionId: string) {
+  return render(
+    <MemoryRouter initialEntries={[`/chats/${sessionId}`]}>
+      <Routes>
+        <Route path="/chats/:sessionId" element={<ChatPage />} />
+      </Routes>
     </MemoryRouter>
   );
 }
@@ -122,5 +132,25 @@ describe("ChatPage", () => {
 
     const sendButton = await screen.findByRole("button", { name: /send/i });
     expect(sendButton).toBeDisabled();
+  });
+
+  it("resumes an existing session from a /chats/:sessionId route instead of creating a new one", async () => {
+    listChatMessagesMock.mockResolvedValue([
+      makeMessage({ id: "m1", role: "user", content: "What Kafka questions came up?" }),
+      makeMessage({ id: "m2", role: "assistant", content: "Nagarro asked about exactly-once delivery." }),
+    ]);
+    renderResumedPage("existing-session-1");
+
+    expect(await screen.findByText("What Kafka questions came up?")).toBeInTheDocument();
+    expect(screen.getByText("Nagarro asked about exactly-once delivery.")).toBeInTheDocument();
+    expect(createChatSessionMock).not.toHaveBeenCalled();
+    expect(listChatMessagesMock).toHaveBeenCalledWith("existing-session-1");
+  });
+
+  it("shows an error when resuming an unknown/inaccessible session", async () => {
+    listChatMessagesMock.mockRejectedValue(new Error("Chat session not found."));
+    renderResumedPage("missing-session");
+
+    expect(await screen.findByText(/failed to load this chat/i)).toBeInTheDocument();
   });
 });

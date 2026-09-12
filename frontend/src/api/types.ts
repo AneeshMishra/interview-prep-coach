@@ -73,6 +73,14 @@ export interface ChatMessageRecord {
   created_at: string;
 }
 
+export interface ChatHistoryEntry {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  preview: string | null;
+}
+
 export type InterviewStatus = "active" | "completed" | "abandoned";
 
 export interface InterviewSessionRecord {
@@ -115,6 +123,18 @@ export interface InterviewSummaryRecord {
 export type InterviewTurnResult =
   | { type: "message"; message: InterviewMessageRecord }
   | { type: "summary"; summary: InterviewSummaryRecord };
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+// Only "google" is wired up on the backend so far — see
+// backend/app/auth/oauth/factory.py. The others are listed so the login
+// page can show them as "coming soon" rather than omitting them silently.
+export type OAuthProviderName = "google" | "facebook" | "linkedin" | "azure";
 
 export interface StartInterviewResponse {
   session: InterviewSessionRecord;

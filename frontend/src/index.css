@@ -520,3 +520,120 @@ button:disabled {
   background: var(--color-danger-bg);
   color: var(--color-danger);
 }
+
+.app-header__account {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.app-header__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.app-header__account-name {
+  font-size: 0.9rem;
+  color: var(--color-muted);
+}
+
+.app-header__logout {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.app-header__logout:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.login-page {
+  max-width: 420px;
+  margin: 3rem auto 0;
+  text-align: center;
+}
+
+.login-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.login-provider-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.login-provider-button:not(:disabled):hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.login-provider-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.login-provider-button__badge {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--color-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+
+.chat-history-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.chat-history-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.chat-history-card__link {
+  display: block;
+  padding: 0.85rem 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.chat-history-card__meta {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  color: var(--color-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+
+.chat-history-card__preview {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -45,6 +45,23 @@ class Settings(BaseSettings):
     # this confidence are flagged for human review rather than trusted outright.
     low_confidence_threshold: float = 0.75
 
+    # Auth — sign-in is always via an external OAuth/SSO provider (see
+    # app/auth/oauth); there is no local password. jwt_secret_key MUST be
+    # overridden (via IPC_JWT_SECRET_KEY) outside local dev.
+    jwt_secret_key: str = "dev-insecure-secret-change-me-in-production-32-bytes-min"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
+    # Where the browser is redirected back to after an OAuth callback.
+    frontend_base_url: str = "http://localhost:5173"
+    # False only for local http:// dev; a real deployment behind https must
+    # keep this True so the session cookies aren't sent in the clear.
+    auth_cookie_secure: bool = False
+
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+
 
 @lru_cache
 def get_settings() -> Settings:

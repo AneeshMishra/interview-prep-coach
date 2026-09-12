@@ -1,5 +1,6 @@
 """
 POST /chat/sessions — start a new Q&A chat session.
+GET  /chat/sessions — history: past sessions, most recently active first.
 POST /chat/sessions/{session_id}/messages — ask a question, get a grounded answer.
 GET  /chat/sessions/{session_id}/messages — full conversation history.
 
@@ -7,14 +8,17 @@ Retrieval-grounded search chat over the existing question knowledge base
 (see app/chat/rag.py). Not the mock-interview state machine reserved for
 InterviewSession/InterviewMessage.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.chat.rag import ChatCandidate, RETRIEVAL_LIMIT, answer_chat_message
 from app.config import Settings, get_settings
 from app.db.base import get_db
-from app.db.models import ChatMessage, ChatSession, InterviewQuestion
+from app.db.models import ChatMessage, ChatSession, Document, InterviewQuestion, User
 from app.llm_providers.factory import get_llm_provider
 from app.retrieval.vector_store import get_vector_store
 
@@ -42,16 +46,68 @@ def _serialize_message(message: ChatMessage) -> dict:
     }
 
 
-def _get_session_or_404(session_id: str, db: Session) -> ChatSession:
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+def _get_session_or_404(session_id: str, user_id: str, db: Session) -> ChatSession:
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .first()
+    )
     if session is None:
         raise HTTPException(status_code=404, detail="Chat session not found.")
     return session
 
 
+PREVIEW_MAX_CHARS = 140
+
+
+def _serialize_session_for_history(session: ChatSession, messages: list[ChatMessage]) -> dict:
+    last_message = messages[-1] if messages else None
+    preview = None
+    if last_message is not None:
+        preview = last_message.content[:PREVIEW_MAX_CHARS]
+        if len(last_message.content) > PREVIEW_MAX_CHARS:
+            preview += "…"
+    return {
+        "id": session.id,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+        "message_count": len(messages),
+        "preview": preview,
+    }
+
+
+@router.get("/sessions")
+def list_sessions(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sessions = (
+        db.query(ChatSession)
+        .filter(ChatSession.user_id == current_user.id)
+        .order_by(ChatSession.updated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+    messages_by_session: dict[str, list[ChatMessage]] = {sid: [] for sid in session_ids}
+    for message in (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id.in_(session_ids))
+        .order_by(ChatMessage.session_id, ChatMessage.sequence_no)
+        .all()
+    ):
+        messages_by_session[message.session_id].append(message)
+
+    return [_serialize_session_for_history(s, messages_by_session[s.id]) for s in sessions]
+
+
 @router.post("/sessions")
-def create_session(db: Session = Depends(get_db)):
-    session = ChatSession()
+def create_session(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    session = ChatSession(user_id=current_user.id)
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -59,8 +115,10 @@ def create_session(db: Session = Depends(get_db)):
 
 
 @router.get("/sessions/{session_id}/messages")
-def list_messages(session_id: str, db: Session = Depends(get_db)):
-    session = _get_session_or_404(session_id, db)
+def list_messages(
+    session_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    session = _get_session_or_404(session_id, current_user.id, db)
     return [_serialize_message(m) for m in session.messages]
 
 
@@ -70,8 +128,9 @@ def send_message(
     payload: SendMessageRequest,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
-    session = _get_session_or_404(session_id, db)
+    session = _get_session_or_404(session_id, current_user.id, db)
 
     text = payload.message.strip()
     if not text:
@@ -84,6 +143,10 @@ def send_message(
         session_id=session.id, sequence_no=next_seq, role="user", content=text
     )
     db.add(user_message)
+    # ChatSession itself has no other column a new message would touch, so
+    # without this the ORM never issues an UPDATE and updated_at (what
+    # list_sessions orders by) would never move past creation time.
+    session.updated_at = datetime.utcnow()
     db.commit()
 
     history = [(m.role, m.content) for m in existing_messages[-HISTORY_TURNS:]]
@@ -96,7 +159,13 @@ def send_message(
 
     question_ids = [hit.question_id for hit in hits]
     questions_by_id = (
-        {q.id: q for q in db.query(InterviewQuestion).filter(InterviewQuestion.id.in_(question_ids)).all()}
+        {
+            q.id: q
+            for q in db.query(InterviewQuestion)
+            .join(Document)
+            .filter(InterviewQuestion.id.in_(question_ids), Document.user_id == current_user.id)
+            .all()
+        }
         if question_ids
         else {}
     )

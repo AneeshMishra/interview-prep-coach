@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user
 from app.config import Settings, get_settings
 from app.db.base import get_db
-from app.db.models import InterviewQuestion
+from app.db.models import Document, InterviewQuestion, User
 from app.retrieval.vector_store import get_vector_store
 
 router = APIRouter(prefix="/questions", tags=["questions"])
@@ -55,11 +56,12 @@ def search_questions(
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
     if query:
-        rows = _semantic_search(db, query, company, role, round_type, difficulty, limit)
+        rows = _semantic_search(db, current_user.id, query, company, role, round_type, difficulty, limit)
     else:
-        db_query = db.query(InterviewQuestion)
+        db_query = db.query(InterviewQuestion).join(Document).filter(Document.user_id == current_user.id)
         if company:
             db_query = db_query.filter(InterviewQuestion.company.ilike(f"%{company}%"))
         if role:
@@ -90,6 +92,7 @@ def search_questions(
 
 def _semantic_search(
     db: Session,
+    user_id: str,
     query: str,
     company: str | None,
     role: str | None,
@@ -111,7 +114,8 @@ def _semantic_search(
     scores = {hit.question_id: hit.score for hit in hits}
     rows = (
         db.query(InterviewQuestion)
-        .filter(InterviewQuestion.id.in_(scores.keys()))
+        .join(Document)
+        .filter(InterviewQuestion.id.in_(scores.keys()), Document.user_id == user_id)
         .all()
     )
     if difficulty:
@@ -126,8 +130,14 @@ def get_question(
     question_id: str,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: User = Depends(get_current_user),
 ):
-    question = db.query(InterviewQuestion).filter(InterviewQuestion.id == question_id).first()
+    question = (
+        db.query(InterviewQuestion)
+        .join(Document)
+        .filter(InterviewQuestion.id == question_id, Document.user_id == current_user.id)
+        .first()
+    )
     if question is None:
         raise HTTPException(status_code=404, detail="Question not found.")
     return _serialize(question, settings.low_confidence_threshold)

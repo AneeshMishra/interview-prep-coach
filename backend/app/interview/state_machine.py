@@ -19,7 +19,14 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.db.models import Evaluation, InterviewMessage, InterviewQuestion, InterviewSession, InterviewSummary
+from app.db.models import (
+    Document,
+    Evaluation,
+    InterviewMessage,
+    InterviewQuestion,
+    InterviewSession,
+    InterviewSummary,
+)
 from app.interview.evaluation import evaluate_answer, summarize_interview
 from app.interview.rubric import Rubric
 from app.llm_providers.base import LLMProvider
@@ -44,12 +51,17 @@ class InterviewCompleted:
 
 
 def _pick_next_question(
-    db: Session, company: str | None, exclude_ids: list[str]
+    db: Session, user_id: str, company: str | None, exclude_ids: list[str]
 ) -> InterviewQuestion | None:
     """RETRIEVE: prefer a real, previously-uploaded question over generating
     one. Try company + round_type first, then fall back to any system_design
-    question, excluding ones already asked this session."""
-    base_query = db.query(InterviewQuestion).filter(InterviewQuestion.round_type == ROUND_TYPE)
+    question, excluding ones already asked this session. Scoped to the
+    interviewing user's own uploaded questions — never another user's."""
+    base_query = (
+        db.query(InterviewQuestion)
+        .join(Document)
+        .filter(InterviewQuestion.round_type == ROUND_TYPE, Document.user_id == user_id)
+    )
     if exclude_ids:
         base_query = base_query.filter(InterviewQuestion.id.notin_(exclude_ids))
 
@@ -69,8 +81,10 @@ def start_interview(
     rubric: Rubric,
     company: str | None,
     role: str | None,
+    user_id: str,
 ) -> AskedQuestion:
     session = InterviewSession(
+        user_id=user_id,
         company=company,
         role=role,
         round_type=ROUND_TYPE,
@@ -83,7 +97,7 @@ def start_interview(
     db.add(session)
     db.commit()
 
-    question = _pick_next_question(db, company, exclude_ids=[])
+    question = _pick_next_question(db, user_id, company, exclude_ids=[])
     if question is not None:
         content = question.question
         question_id = question.id
@@ -205,7 +219,7 @@ def submit_answer(
         return InterviewCompleted(summary=summary)
 
     excluded = [qid for qid in root_question_ids if qid is not None]
-    next_question = _pick_next_question(db, session.company, exclude_ids=excluded)
+    next_question = _pick_next_question(db, session.user_id, session.company, exclude_ids=excluded)
     if next_question is not None:
         content, question_id = next_question.question, next_question.id
     else:

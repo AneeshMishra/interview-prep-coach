@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.models import Document, InterviewQuestion
 from app.ingestion.reindex import reindex_all_questions
+from tests.auth_helpers import create_user
 
 
 class FakeVectorStore:
@@ -30,7 +31,8 @@ def db_session(tmp_path):
 
 
 def test_reindex_upserts_every_persisted_question(db_session):
-    document = Document(filename="sample.docx", content_hash="hash1", status="done")
+    user_id = create_user(db_session).id
+    document = Document(user_id=user_id, filename="sample.docx", content_hash="hash1", status="done")
     db_session.add(document)
     db_session.commit()
 

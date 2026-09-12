@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Column, String, Float, Integer, ForeignKey, DateTime, JSON, Text
+    Column, String, Float, Integer, ForeignKey, DateTime, JSON, Text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 
@@ -17,18 +17,63 @@ def gen_uuid() -> str:
     return str(uuid.uuid4())
 
 
+class User(Base):
+    """An account holder. Identity always comes from an OAuth/SSO provider
+    (see OAuthAccount) — there is no local password, so this table only
+    holds the profile fields providers hand back at login."""
+
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    email = Column(String, unique=True, nullable=False, index=True)
+    display_name = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    oauth_accounts = relationship("OAuthAccount", back_populates="user")
+
+
+class OAuthAccount(Base):
+    """One linked external identity (Google/Facebook/LinkedIn/Azure AD) for
+    a User. A user can accumulate more than one if they sign in via
+    different providers with the same email in the future; for now each
+    login finds-or-creates by (provider, provider_account_id)."""
+
+    __tablename__ = "oauth_accounts"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    provider = Column(String, nullable=False)  # google|facebook|linkedin|azure
+    provider_account_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="oauth_accounts")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_account_id", name="uq_oauth_provider_account"),
+    )
+
+
 class Document(Base):
     __tablename__ = "documents"
 
     id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     filename = Column(String, nullable=False)
-    content_hash = Column(String, unique=True, nullable=False, index=True)
+    # Dedup is per-user, not global: two different users uploading the same
+    # file content are two independent knowledge bases, not a duplicate.
+    content_hash = Column(String, nullable=False, index=True)
     status = Column(String, default="pending")  # pending|processing|done|failed
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     questions = relationship("InterviewQuestion", back_populates="document")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "content_hash", name="uq_documents_user_content_hash"),
+    )
 
 
 class InterviewQuestion(Base):
@@ -64,6 +109,7 @@ class InterviewSession(Base):
     __tablename__ = "interview_sessions"
 
     id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     company = Column(String)
     role = Column(String)
     round_type = Column(String)
@@ -135,6 +181,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     id = Column(String, primary_key=True, default=gen_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

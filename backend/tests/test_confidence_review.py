@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.db.base import Base, get_db
 from app.db.models import Document, InterviewQuestion
 from app.main import app
+from tests.auth_helpers import authenticate, create_user
 
 
 @pytest.fixture
@@ -28,7 +29,8 @@ def client():
     app.dependency_overrides[get_db] = override_get_db
 
     session = TestingSession()
-    document = Document(filename="sample.docx", content_hash="hash", status="done")
+    user_id = create_user(session).id
+    document = Document(user_id=user_id, filename="sample.docx", content_hash="hash", status="done")
     session.add(document)
     session.commit()
 
@@ -60,6 +62,7 @@ def client():
     session.close()
 
     test_client = TestClient(app)
+    authenticate(test_client, user_id)
     yield test_client, high_id, low_id, unknown_id
 
     app.dependency_overrides.clear()

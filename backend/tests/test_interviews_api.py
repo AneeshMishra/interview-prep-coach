@@ -11,6 +11,7 @@ from app.db.models import Document, InterviewQuestion
 from app.interview.rubric import load_rubric
 from app.interview.state_machine import MAX_QUESTIONS
 from app.main import app
+from tests.auth_helpers import authenticate, create_user
 
 
 class ScriptedLLM:
@@ -50,7 +51,8 @@ def client_factory(monkeypatch):
         TestingSession = sessionmaker(bind=engine)
         session = TestingSession()
 
-        document = Document(filename="sample.docx", content_hash="hash", status="done")
+        user_id = create_user(session).id
+        document = Document(user_id=user_id, filename="sample.docx", content_hash="hash", status="done")
         session.add(document)
         session.commit()
         for i in range(MAX_QUESTIONS):
@@ -75,7 +77,9 @@ def client_factory(monkeypatch):
         fake_llm = ScriptedLLM(llm_responses)
         monkeypatch.setattr("app.api.routers.interviews.get_llm_provider", lambda settings: fake_llm)
 
-        return TestClient(app)
+        client = TestClient(app)
+        authenticate(client, user_id)
+        return client
 
     yield make
     app.dependency_overrides.clear()
@@ -203,6 +207,7 @@ def test_create_interview_returns_503_when_llm_unreachable_and_no_stored_questio
 
     try:
         client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
         response = client.post("/api/v1/interviews", json={"company": "BrandNewCo"})
         assert response.status_code == 503
     finally:

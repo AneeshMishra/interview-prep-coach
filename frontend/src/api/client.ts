@@ -1,4 +1,5 @@
 import type {
+  ChatHistoryEntry,
   ChatMessageRecord,
   ChatSessionRecord,
   DocumentRecord,
@@ -7,10 +8,12 @@ import type {
   InterviewSessionRecord,
   InterviewSummaryRecord,
   InterviewTurnResult,
+  OAuthProviderName,
   Question,
   QuestionFilters,
   StartInterviewResponse,
   UploadResponse,
+  UserProfile,
 } from "./types";
 
 // Browser-context default: the backend container/process publishes its API
@@ -32,7 +35,10 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, init);
+    // Every request carries the httpOnly session cookies (see
+    // app/api/routers/auth.py) — without this, the browser never sends
+    // them cross-origin (frontend on :5173, backend on :8000).
+    response = await fetch(`${API_BASE_URL}${path}`, { ...init, credentials: "include" });
   } catch {
     throw new ApiError(0, "Could not reach the API. Is the backend running?");
   }
@@ -50,6 +56,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, detail);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return (await response.json()) as T;
 }
 
@@ -80,6 +89,10 @@ export function getQuestion(questionId: string): Promise<Question> {
 
 export function createChatSession(): Promise<ChatSessionRecord> {
   return request<ChatSessionRecord>("/chat/sessions", { method: "POST" });
+}
+
+export function listChatSessions(): Promise<ChatHistoryEntry[]> {
+  return request<ChatHistoryEntry[]>("/chat/sessions");
 }
 
 export function listChatMessages(sessionId: string): Promise<ChatMessageRecord[]> {
@@ -124,4 +137,19 @@ export function getInterviewTranscript(sessionId: string): Promise<InterviewMess
 
 export function getInterviewSummary(sessionId: string): Promise<InterviewSummaryRecord> {
   return request<InterviewSummaryRecord>(`/interviews/${sessionId}/summary`);
+}
+
+// Sign-in is a full-page redirect (Google's consent screen -> our backend
+// callback -> back here), not a fetch — the browser needs to actually
+// navigate so it can present Google's own login UI.
+export function oauthLoginUrl(provider: OAuthProviderName): string {
+  return `${API_BASE_URL}/auth/${provider}/login`;
+}
+
+export function getCurrentUser(): Promise<UserProfile> {
+  return request<UserProfile>("/auth/me");
+}
+
+export function logout(): Promise<void> {
+  return request<void>("/auth/logout", { method: "POST" });
 }

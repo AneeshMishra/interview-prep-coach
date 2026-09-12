@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, getQuestion, listQuestions, uploadDocument } from "../api/client";
+import { ApiError, getCurrentUser, getQuestion, listQuestions, logout, uploadDocument } from "../api/client";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -58,5 +58,22 @@ describe("api client", () => {
     );
 
     await expect(listQuestions()).rejects.toMatchObject({ status: 0 });
+  });
+
+  it("always sends credentials so the session cookie rides along cross-origin", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: "u1", email: "a@b.com" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getCurrentUser();
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.credentials).toBe("include");
+  });
+
+  it("handles a 204 No Content response without trying to parse a body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(logout()).resolves.toBeUndefined();
   });
 });

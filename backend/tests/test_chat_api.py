@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base, get_db
 from app.db.models import Document, InterviewQuestion
 from app.main import app
+from tests.auth_helpers import authenticate, create_user
 
 
 class FakeLLM:
@@ -45,7 +46,10 @@ def client_factory(tmp_path, monkeypatch):
         TestingSession = sessionmaker(bind=engine)
         session = TestingSession()
 
-        document = Document(filename="sample.docx", content_hash="hash", status="done")
+        user_id = create_user(session).id
+        document = Document(
+            user_id=user_id, filename="sample.docx", content_hash="hash", status="done"
+        )
         session.add(document)
         session.commit()
 
@@ -79,7 +83,9 @@ def client_factory(tmp_path, monkeypatch):
         monkeypatch.setattr("app.api.routers.chat.get_vector_store", lambda: fake_vector_store)
         monkeypatch.setattr("app.api.routers.chat.get_llm_provider", lambda settings: fake_llm)
 
-        return TestClient(app), question_id, fake_vector_store, fake_llm
+        client = TestClient(app)
+        authenticate(client, user_id)
+        return client, question_id, fake_vector_store, fake_llm
 
     yield make
     app.dependency_overrides.clear()
@@ -174,6 +180,7 @@ def test_no_matching_candidates_gives_a_plain_no_results_answer_without_calling_
 
     try:
         client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
         session = client.post("/api/v1/chat/sessions").json()
         response = client.post(
             f"/api/v1/chat/sessions/{session['id']}/messages", json={"message": "anything"}
@@ -182,6 +189,45 @@ def test_no_matching_candidates_gives_a_plain_no_results_answer_without_calling_
         assert "couldn't find anything relevant" in response.json()["content"].lower()
     finally:
         app.dependency_overrides.clear()
+
+
+def test_list_sessions_is_empty_when_none_started(client_factory):
+    client, *_ = client_factory(None, "{}")
+    assert client.get("/api/v1/chat/sessions").json() == []
+
+
+def test_list_sessions_shows_most_recent_first_with_preview_and_count(client_factory):
+    client, *_ = client_factory(None, json.dumps({"answer": "ok", "cited_question_ids": []}))
+
+    first = client.post("/api/v1/chat/sessions").json()
+    second = client.post("/api/v1/chat/sessions").json()
+
+    # Sending a message in the FIRST session should bump it back to the
+    # front of the list — order reflects last activity, not creation time.
+    client.post(f"/api/v1/chat/sessions/{first['id']}/messages", json={"message": "hello there"})
+
+    history = client.get("/api/v1/chat/sessions").json()
+    assert [s["id"] for s in history] == [first["id"], second["id"]]
+
+    active_entry = next(s for s in history if s["id"] == first["id"])
+    assert active_entry["message_count"] == 2
+    assert active_entry["preview"] == "ok"
+
+    empty_entry = next(s for s in history if s["id"] == second["id"])
+    assert empty_entry["message_count"] == 0
+    assert empty_entry["preview"] is None
+
+
+def test_list_sessions_preview_is_truncated_for_long_messages(client_factory):
+    long_answer = "x" * 200
+    client, *_ = client_factory(None, json.dumps({"answer": long_answer, "cited_question_ids": []}))
+
+    session = client.post("/api/v1/chat/sessions").json()
+    client.post(f"/api/v1/chat/sessions/{session['id']}/messages", json={"message": "hi"})
+
+    history = client.get("/api/v1/chat/sessions").json()
+    assert len(history[0]["preview"]) == 141  # 140 chars + the truncation ellipsis
+    assert history[0]["preview"].endswith("…")
 
 
 def test_vector_store_failure_returns_503(tmp_path, monkeypatch):
@@ -206,6 +252,7 @@ def test_vector_store_failure_returns_503(tmp_path, monkeypatch):
 
     try:
         client = TestClient(app)
+        authenticate(client, create_user(TestingSession()).id)
         session = client.post("/api/v1/chat/sessions").json()
         response = client.post(
             f"/api/v1/chat/sessions/{session['id']}/messages", json={"message": "anything"}

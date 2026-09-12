@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.models import Document, InterviewQuestion, QuestionTag
 from app.ingestion.pipeline import run_ingestion
+from tests.auth_helpers import create_user
 
 
 class FakeLLM:
@@ -66,7 +67,8 @@ def make_docx(tmp_path):
 
 def test_run_ingestion_persists_questions_tags_and_embeddings(db_session, tmp_path):
     doc_path = make_docx(tmp_path)
-    document = Document(filename="sample.docx", content_hash="hash1", status="pending")
+    user_id = create_user(db_session).id
+    document = Document(user_id=user_id, filename="sample.docx", content_hash="hash1", status="pending")
     db_session.add(document)
     db_session.commit()
 
@@ -98,7 +100,8 @@ def test_run_ingestion_persists_questions_tags_and_embeddings(db_session, tmp_pa
 
 def test_run_ingestion_marks_document_failed_on_llm_error(db_session, tmp_path):
     doc_path = make_docx(tmp_path)
-    document = Document(filename="sample.docx", content_hash="hash2", status="pending")
+    user_id = create_user(db_session).id
+    document = Document(user_id=user_id, filename="sample.docx", content_hash="hash2", status="pending")
     db_session.add(document)
     db_session.commit()
 

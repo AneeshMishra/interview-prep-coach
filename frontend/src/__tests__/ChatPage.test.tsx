@@ -1,14 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatPage } from "../pages/ChatPage";
 import type { ChatMessageRecord } from "../api/types";
 
-const { createChatSessionMock, listChatMessagesMock, sendChatMessageMock } = vi.hoisted(() => ({
+const { createChatSessionMock, listChatMessagesMock, sendChatMessageStreamMock } = vi.hoisted(() => ({
   createChatSessionMock: vi.fn(),
   listChatMessagesMock: vi.fn(),
-  sendChatMessageMock: vi.fn(),
+  sendChatMessageStreamMock: vi.fn(),
 }));
 
 vi.mock("../api/client", async () => {
@@ -17,7 +17,7 @@ vi.mock("../api/client", async () => {
     ...actual,
     createChatSession: createChatSessionMock,
     listChatMessages: listChatMessagesMock,
-    sendChatMessage: sendChatMessageMock,
+    sendChatMessageStream: sendChatMessageStreamMock,
   };
 });
 
@@ -55,7 +55,7 @@ describe("ChatPage", () => {
   afterEach(() => {
     createChatSessionMock.mockReset();
     listChatMessagesMock.mockReset();
-    sendChatMessageMock.mockReset();
+    sendChatMessageStreamMock.mockReset();
   });
 
   it("starts a session and shows a starter prompt when there's no history", async () => {
@@ -81,14 +81,16 @@ describe("ChatPage", () => {
   it("sends a message and renders the grounded reply with a source link", async () => {
     createChatSessionMock.mockResolvedValue({ id: "s1", created_at: "2026-01-01T00:00:00Z" });
     listChatMessagesMock.mockResolvedValue([]);
-    sendChatMessageMock.mockResolvedValue(
-      makeMessage({
+    sendChatMessageStreamMock.mockImplementation(async (_sessionId: string, _message: string, onChunk: (t: string) => void) => {
+      onChunk("Nagarro asked ");
+      onChunk("about virtual threads.");
+      return makeMessage({
         id: "m2",
         role: "assistant",
         content: "Nagarro asked about virtual threads.",
         cited_question_ids: ["q1"],
-      })
-    );
+      });
+    });
     const user = userEvent.setup();
     renderPage();
 
@@ -103,10 +105,44 @@ describe("ChatPage", () => {
     expect(sourceLink).toHaveAttribute("href", "/questions/q1");
   });
 
+  it("renders the answer bubble growing as chunks arrive, before the stream completes", async () => {
+    createChatSessionMock.mockResolvedValue({ id: "s1", created_at: "2026-01-01T00:00:00Z" });
+    listChatMessagesMock.mockResolvedValue([]);
+    let resolveStream!: (message: ChatMessageRecord) => void;
+    let onChunkCallback!: (text: string) => void;
+    sendChatMessageStreamMock.mockImplementation(
+      (_sessionId: string, _message: string, onChunk: (t: string) => void) =>
+        new Promise<ChatMessageRecord>((resolve) => {
+          onChunkCallback = onChunk;
+          resolveStream = resolve;
+        })
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    const input = await screen.findByLabelText(/chat message/i);
+    await user.type(input, "anything");
+    await user.click(screen.getByRole("button", { name: /send/i }));
+
+    // Before any chunk arrives: a loading indicator, no partial bubble yet.
+    expect(await screen.findByText(/thinking/i)).toBeInTheDocument();
+
+    act(() => onChunkCallback("Partial answer"));
+    expect(await screen.findByText("Partial answer")).toBeInTheDocument();
+    expect(screen.queryByText(/thinking/i)).not.toBeInTheDocument();
+
+    act(() => onChunkCallback(" continues here."));
+    expect(await screen.findByText("Partial answer continues here.")).toBeInTheDocument();
+
+    act(() => resolveStream(makeMessage({ id: "m2", content: "Partial answer continues here." })));
+    await waitFor(() => expect(screen.queryByText(/thinking/i)).not.toBeInTheDocument());
+    expect(await screen.findByText("Partial answer continues here.")).toBeInTheDocument();
+  });
+
   it("shows an error message when sending fails, without losing the typed message", async () => {
     createChatSessionMock.mockResolvedValue({ id: "s1", created_at: "2026-01-01T00:00:00Z" });
     listChatMessagesMock.mockResolvedValue([]);
-    sendChatMessageMock.mockRejectedValue(new Error("Semantic search is unavailable."));
+    sendChatMessageStreamMock.mockRejectedValue(new Error("Semantic search is unavailable."));
     const user = userEvent.setup();
     renderPage();
 

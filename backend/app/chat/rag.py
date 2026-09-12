@@ -11,6 +11,7 @@ consistent with the app's provenance principle (CLAUDE.md: never present
 something not actually in the knowledge base as if it were).
 """
 import json
+import re
 from dataclasses import asdict, dataclass
 
 from app.llm_providers.base import LLMProvider
@@ -65,21 +66,13 @@ def build_user_prompt(
     )
 
 
-def answer_chat_message(
-    user_message: str,
-    candidates: list[ChatCandidate],
-    history: list[tuple[str, str]],
-    llm: LLMProvider,
-) -> ChatAnswer:
-    if not candidates:
-        return ChatAnswer(
-            answer="I couldn't find anything relevant to that in the knowledge base yet.",
-            cited_question_ids=[],
-        )
+NO_CANDIDATES_ANSWER = "I couldn't find anything relevant to that in the knowledge base yet."
 
-    prompt = build_user_prompt(user_message, candidates, history)
-    raw = llm.complete(system_prompt=CHAT_SYSTEM_PROMPT, user_prompt=prompt)
 
+def parse_chat_answer(raw: str, candidates: list[ChatCandidate]) -> ChatAnswer:
+    """Parse+validate a raw LLM response against the CHAT_SYSTEM_PROMPT
+    contract. Shared by the non-streaming and streaming code paths so both
+    apply identical citation-trust rules to identical LLM output."""
     try:
         parsed = json.loads(raw)
         answer = str(parsed.get("answer", "")).strip()
@@ -100,3 +93,91 @@ def answer_chat_message(
         answer = "I couldn't find anything relevant to that in the knowledge base."
 
     return ChatAnswer(answer=answer, cited_question_ids=cited)
+
+
+_ANSWER_FIELD_PATTERN = re.compile(r'"answer"\s*:\s*"')
+
+_SIMPLE_JSON_ESCAPES = {
+    '"': '"', "\\": "\\", "/": "/", "n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f",
+}
+
+
+def _decode_partial_json_string(buffer: str, start: int) -> tuple[str, bool]:
+    """Decode a JSON string body starting at buffer[start] (just past the
+    opening quote), stopping at the first unescaped closing quote — or, if
+    the closing quote hasn't arrived yet, decoding as much as is safely
+    decodable (never a half-consumed escape sequence at the buffer's end).
+    Returns (decoded_text, closed)."""
+    out: list[str] = []
+    i = start
+    n = len(buffer)
+    while i < n:
+        ch = buffer[i]
+        if ch == "\\":
+            if i + 1 >= n:
+                break  # escape sequence not fully arrived yet
+            esc = buffer[i + 1]
+            if esc in _SIMPLE_JSON_ESCAPES:
+                out.append(_SIMPLE_JSON_ESCAPES[esc])
+                i += 2
+                continue
+            if esc == "u":
+                if i + 6 > n:
+                    break  # \uXXXX not fully arrived yet
+                out.append(chr(int(buffer[i + 2 : i + 6], 16)))
+                i += 6
+                continue
+            i += 1  # unrecognized escape — skip the backslash defensively
+            continue
+        if ch == '"':
+            return "".join(out), True
+        out.append(ch)
+        i += 1
+    return "".join(out), False
+
+
+class AnswerStreamExtractor:
+    """Incrementally extracts the growing "answer" string value out of a raw
+    token stream shaped like the CHAT_SYSTEM_PROMPT contract:
+    {"answer": "...", "cited_question_ids": [...]}. Citations are never
+    streamed — they're only meaningful (and only trustworthy, see
+    parse_chat_answer's validation) once the full object has arrived, so
+    only the free-text "answer" field is worth showing incrementally."""
+
+    def __init__(self):
+        self.buffer = ""
+        self._answer_start: int | None = None
+        self._emitted = 0
+        self._closed = False
+
+    def feed(self, chunk: str) -> str:
+        """Feed a newly-arrived raw chunk; return the newly-decoded slice of
+        answer text to display (possibly empty)."""
+        self.buffer += chunk
+        if self._closed:
+            return ""
+        if self._answer_start is None:
+            match = _ANSWER_FIELD_PATTERN.search(self.buffer)
+            if match is None:
+                return ""
+            self._answer_start = match.end()
+
+        decoded, closed = _decode_partial_json_string(self.buffer, self._answer_start)
+        new_text = decoded[self._emitted :]
+        self._emitted = len(decoded)
+        self._closed = closed
+        return new_text
+
+
+def answer_chat_message(
+    user_message: str,
+    candidates: list[ChatCandidate],
+    history: list[tuple[str, str]],
+    llm: LLMProvider,
+) -> ChatAnswer:
+    if not candidates:
+        return ChatAnswer(answer=NO_CANDIDATES_ANSWER, cited_question_ids=[])
+
+    prompt = build_user_prompt(user_message, candidates, history)
+    raw = llm.complete(system_prompt=CHAT_SYSTEM_PROMPT, user_prompt=prompt)
+    return parse_chat_answer(raw, candidates)

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ApiError, createChatSession, listChatMessages, sendChatMessage } from "../api/client";
+import { ApiError, createChatSession, listChatMessages, sendChatMessageStream } from "../api/client";
 import type { ChatMessageRecord } from "../api/types";
 import { ErrorMessage, Loading } from "../components/StatusStates";
 
@@ -14,6 +14,9 @@ export function ChatPage() {
   const [sending, setSending] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  // null while waiting for the first chunk (shows "Thinking…"); becomes a
+  // growing string as the assistant's answer streams in via SSE.
+  const [streamingText, setStreamingText] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -53,7 +56,7 @@ export function ChatPage() {
     // Optional chaining on the call itself, not just `.current` — jsdom
     // (used in tests) doesn't implement scrollIntoView at all.
     bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, streamingText]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -74,14 +77,18 @@ export function ChatPage() {
     setDraft("");
     setSending(true);
     setSendError(null);
+    setStreamingText(null);
 
     try {
-      const reply = await sendChatMessage(sessionId, text);
+      const reply = await sendChatMessageStream(sessionId, text, (chunk) => {
+        setStreamingText((prev) => (prev ?? "") + chunk);
+      });
       setMessages((prev) => [...prev, reply]);
     } catch (err) {
       setSendError(err instanceof ApiError ? err.message : "Failed to get a response.");
     } finally {
       setSending(false);
+      setStreamingText(null);
     }
   }
 
@@ -113,7 +120,19 @@ export function ChatPage() {
             {messages.map((message) => (
               <ChatBubble key={message.id} message={message} />
             ))}
-            {sending && <Loading label="Thinking…" />}
+            {sending && streamingText === null && <Loading label="Thinking…" />}
+            {sending && streamingText !== null && (
+              <ChatBubble
+                message={{
+                  id: "streaming",
+                  session_id: sessionId ?? "",
+                  role: "assistant",
+                  content: streamingText,
+                  cited_question_ids: [],
+                  created_at: new Date().toISOString(),
+                }}
+              />
+            )}
             <div ref={bottomRef} />
           </div>
 

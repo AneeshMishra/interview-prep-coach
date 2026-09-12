@@ -120,6 +120,19 @@ def test_chat_session_is_not_reachable_by_a_different_user(two_users_client):
     assert response.status_code == 404
 
 
+def test_chat_stream_endpoint_is_not_reachable_by_a_different_user(two_users_client):
+    client, alice_id, bob_id, _, _ = two_users_client
+
+    authenticate(client, alice_id)
+    session = client.post("/api/v1/chat/sessions").json()
+
+    authenticate(client, bob_id)
+    response = client.post(
+        f"/api/v1/chat/sessions/{session['id']}/messages/stream", json={"message": "hi"}
+    )
+    assert response.status_code == 404
+
+
 def test_chat_session_list_excludes_other_users_sessions(two_users_client):
     client, alice_id, bob_id, _, _ = two_users_client
 

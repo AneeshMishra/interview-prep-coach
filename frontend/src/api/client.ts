@@ -107,6 +107,82 @@ export function sendChatMessage(sessionId: string, message: string): Promise<Cha
   });
 }
 
+function parseSseFrame(rawFrame: string): { event: string; data: string } {
+  let event = "message";
+  const dataLines: string[] = [];
+  for (const line of rawFrame.split("\n")) {
+    if (line.startsWith("event:")) {
+      event = line.slice("event:".length).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trim());
+    }
+  }
+  return { event, data: dataLines.join("\n") };
+}
+
+// EventSource can't send a POST body, so the SSE response is consumed by
+// hand here: fetch() + a ReadableStream reader, splitting the decoded text
+// on the blank line that terminates each "event: ...\ndata: ...\n\n" frame.
+export async function sendChatMessageStream(
+  sessionId: string,
+  message: string,
+  onChunk: (text: string) => void
+): Promise<ChatMessageRecord> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}/messages/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ message }),
+    });
+  } catch {
+    throw new ApiError(0, "Could not reach the API. Is the backend running?");
+  }
+
+  if (!response.ok || !response.body) {
+    let detail = response.statusText;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // Response body wasn't JSON — fall back to statusText.
+    }
+    throw new ApiError(response.status, detail);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalMessage: ChatMessageRecord | null = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let frameEnd: number;
+    while ((frameEnd = buffer.indexOf("\n\n")) !== -1) {
+      const { event, data } = parseSseFrame(buffer.slice(0, frameEnd));
+      buffer = buffer.slice(frameEnd + 2);
+      if (!data) continue;
+
+      if (event === "chunk") {
+        onChunk((JSON.parse(data) as { text: string }).text);
+      } else if (event === "message") {
+        finalMessage = JSON.parse(data) as ChatMessageRecord;
+      } else if (event === "error") {
+        throw new ApiError(0, (JSON.parse(data) as { detail: string }).detail);
+      }
+    }
+  }
+
+  if (!finalMessage) {
+    throw new ApiError(0, "The response stream ended unexpectedly.");
+  }
+  return finalMessage;
+}
+
 export function startInterview(company: string, role: string): Promise<StartInterviewResponse> {
   return request<StartInterviewResponse>("/interviews", {
     method: "POST",

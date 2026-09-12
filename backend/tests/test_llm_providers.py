@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -19,6 +21,28 @@ class FakeResponse:
 
     def json(self):
         return self._json_body
+
+
+class FakeStreamResponse:
+    """Fakes the context manager httpx.stream() returns, for testing each
+    provider's stream() against canned raw lines (NDJSON or SSE)."""
+
+    def __init__(self, lines: list[str], status_code: int = 200):
+        self._lines = lines
+        self.status_code = status_code
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError("error", request=None, response=self)
+
+    def iter_lines(self):
+        return iter(self._lines)
 
 
 class TestOllamaProvider:
@@ -50,6 +74,39 @@ class TestOllamaProvider:
         provider = OllamaProvider(base_url="http://localhost:11434", model="llama3")
         with pytest.raises(httpx.HTTPStatusError):
             provider.complete(system_prompt="sys", user_prompt="user")
+
+    def test_stream_yields_content_fragments_from_ndjson(self, monkeypatch):
+        captured = {}
+        lines = [
+            json.dumps({"message": {"content": "Design "}, "done": False}),
+            "",  # NDJSON streams can include blank keep-alive lines
+            json.dumps({"message": {"content": "a URL "}, "done": False}),
+            json.dumps({"message": {"content": "shortener."}, "done": False}),
+            json.dumps({"message": {"content": ""}, "done": True}),
+        ]
+
+        def fake_stream(method, url, json, timeout):
+            captured["method"] = method
+            captured["url"] = url
+            captured["json"] = json
+            return FakeStreamResponse(lines)
+
+        monkeypatch.setattr(httpx, "stream", fake_stream)
+
+        provider = OllamaProvider(base_url="http://localhost:11434", model="llama3")
+        chunks = list(provider.stream(system_prompt="sys", user_prompt="user"))
+
+        assert chunks == ["Design ", "a URL ", "shortener."]
+        assert captured["method"] == "POST"
+        assert captured["url"] == "http://localhost:11434/api/chat"
+        assert captured["json"]["stream"] is True
+
+    def test_stream_raises_on_http_error(self, monkeypatch):
+        monkeypatch.setattr(httpx, "stream", lambda *a, **k: FakeStreamResponse([], status_code=500))
+
+        provider = OllamaProvider(base_url="http://localhost:11434", model="llama3")
+        with pytest.raises(httpx.HTTPStatusError):
+            list(provider.stream(system_prompt="sys", user_prompt="user"))
 
 
 class TestOpenAIProvider:
@@ -89,6 +146,40 @@ class TestOpenAIProvider:
         provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini")
         with pytest.raises(httpx.HTTPStatusError):
             provider.complete(system_prompt="sys", user_prompt="user")
+
+    def test_stream_yields_content_deltas_from_sse(self, monkeypatch):
+        captured = {}
+        lines = [
+            "data: " + json.dumps({"choices": [{"delta": {"role": "assistant"}}]}),
+            "",
+            "data: " + json.dumps({"choices": [{"delta": {"content": "Design "}}]}),
+            "data: " + json.dumps({"choices": [{"delta": {"content": "a rate limiter."}}]}),
+            "data: " + json.dumps({"choices": [{"delta": {}, "finish_reason": "stop"}]}),
+            "data: [DONE]",
+        ]
+
+        def fake_stream(method, url, headers, json, timeout):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeStreamResponse(lines)
+
+        monkeypatch.setattr(httpx, "stream", fake_stream)
+
+        provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini")
+        chunks = list(provider.stream(system_prompt="sys", user_prompt="user"))
+
+        assert chunks == ["Design ", "a rate limiter."]
+        assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+        assert captured["headers"]["Authorization"] == "Bearer sk-test"
+        assert captured["json"]["stream"] is True
+
+    def test_stream_raises_on_http_error(self, monkeypatch):
+        monkeypatch.setattr(httpx, "stream", lambda *a, **k: FakeStreamResponse([], status_code=401))
+
+        provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini")
+        with pytest.raises(httpx.HTTPStatusError):
+            list(provider.stream(system_prompt="sys", user_prompt="user"))
 
 
 class TestAnthropicProvider:
@@ -140,6 +231,46 @@ class TestAnthropicProvider:
         provider = AnthropicProvider(api_key="sk-ant-test", model="claude-sonnet-4-5")
         with pytest.raises(httpx.HTTPStatusError):
             provider.complete(system_prompt="sys", user_prompt="user")
+
+    def test_stream_yields_text_deltas_only_from_content_block_delta_events(self, monkeypatch):
+        captured = {}
+        lines = [
+            "data: " + json.dumps({"type": "message_start"}),
+            "data: " + json.dumps({"type": "content_block_start"}),
+            "",
+            "data: " + json.dumps(
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Design "}}
+            ),
+            "data: " + json.dumps(
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "a rate limiter."}}
+            ),
+            "data: " + json.dumps({"type": "content_block_stop"}),
+            "data: " + json.dumps({"type": "message_delta"}),
+            "data: " + json.dumps({"type": "message_stop"}),
+        ]
+
+        def fake_stream(method, url, headers, json, timeout):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeStreamResponse(lines)
+
+        monkeypatch.setattr(httpx, "stream", fake_stream)
+
+        provider = AnthropicProvider(api_key="sk-ant-test", model="claude-sonnet-4-5")
+        chunks = list(provider.stream(system_prompt="sys", user_prompt="user"))
+
+        assert chunks == ["Design ", "a rate limiter."]
+        assert captured["url"] == "https://api.anthropic.com/v1/messages"
+        assert captured["headers"]["x-api-key"] == "sk-ant-test"
+        assert captured["json"]["stream"] is True
+
+    def test_stream_raises_on_http_error(self, monkeypatch):
+        monkeypatch.setattr(httpx, "stream", lambda *a, **k: FakeStreamResponse([], status_code=401))
+
+        provider = AnthropicProvider(api_key="sk-ant-test", model="claude-sonnet-4-5")
+        with pytest.raises(httpx.HTTPStatusError):
+            list(provider.stream(system_prompt="sys", user_prompt="user"))
 
 
 class TestProviderFactory:

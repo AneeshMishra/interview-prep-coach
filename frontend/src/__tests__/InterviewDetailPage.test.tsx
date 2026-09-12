@@ -52,6 +52,7 @@ function makeSummary(overrides: Partial<InterviewSummaryRecord> = {}): Interview
   return {
     session_id: "s1",
     overall_score: 3.8,
+    criteria_breakdown: { architecture: 4.2, communication: 3.5 },
     strengths: ["Clear communication."],
     weaknesses: ["Missed failure modes."],
     recommendations: ["Practice capacity estimation."],

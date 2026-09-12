@@ -120,6 +120,9 @@ def test_full_interview_flow_reaches_a_summary(client_factory):
     assert result["type"] == "summary"
     assert result["summary"]["overall_score"] == pytest.approx(4.0)
     assert result["summary"]["strengths"] == ["Clear thinker."]
+    breakdown = result["summary"]["criteria_breakdown"]
+    assert set(breakdown.keys()) == set(load_rubric("system_design").criteria)
+    assert all(score == pytest.approx(4.0) for score in breakdown.values())
 
     session_status = client.get(f"/api/v1/interviews/{session_id}").json()
     assert session_status["status"] == "completed"
@@ -127,6 +130,7 @@ def test_full_interview_flow_reaches_a_summary(client_factory):
 
     summary = client.get(f"/api/v1/interviews/{session_id}/summary").json()
     assert summary["overall_score"] == pytest.approx(4.0)
+    assert summary["criteria_breakdown"] == breakdown
 
     transcript = client.get(f"/api/v1/interviews/{session_id}/transcript").json()
     assert len(transcript) == MAX_QUESTIONS * 2  # one interviewer + one candidate message per question

@@ -43,6 +43,24 @@ class Rubric(BaseModel):
         )
         return weighted_sum / total_weight
 
+    def average_criteria(self, criteria_scores_list: list[dict[str, float]]) -> dict[str, float]:
+        """Per-criterion breakdown for a completed interview: average this
+        criterion's score across every answer it was actually scored on
+        (clamped into the rubric's range first — same "never trust the
+        LLM's own arithmetic" rule as weighted_score). Unlike
+        weighted_score, a criterion never once scored across any answer is
+        omitted rather than defaulted to the minimum — there's nothing to
+        average, and defaulting it would fabricate a rating no answer
+        actually received. Preserves the rubric's criteria order."""
+        totals: dict[str, float] = {}
+        counts: dict[str, int] = {}
+        for name in self.criteria:
+            for scores in criteria_scores_list:
+                if name in scores:
+                    totals[name] = totals.get(name, 0.0) + self.clamp(scores[name])
+                    counts[name] = counts.get(name, 0) + 1
+        return {name: totals[name] / counts[name] for name in self.criteria if name in counts}
+
 
 class RubricNotFoundError(Exception):
     pass

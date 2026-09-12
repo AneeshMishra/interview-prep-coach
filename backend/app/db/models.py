@@ -114,3 +114,40 @@ class InterviewSummary(Base):
     weaknesses_json = Column(JSON, nullable=True)
     recommendations_json = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ChatSession(Base):
+    """A Q&A search-chat conversation over the question knowledge base.
+
+    Deliberately separate from InterviewSession: that table (above) is
+    reserved for the future mock-interview state machine (SETUP -> ASK ->
+    WAIT_FOR_ANSWER -> EVALUATE -> SUMMARY per CLAUDE.md) — a stateful,
+    rubric-scored workflow. This is a plain RAG chat: no state machine, no
+    evaluation, just retrieval-grounded question answering.
+    """
+
+    __tablename__ = "chat_sessions"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    messages = relationship(
+        "ChatMessage", back_populates="session", order_by="ChatMessage.sequence_no"
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(String, primary_key=True, default=gen_uuid)
+    session_id = Column(String, ForeignKey("chat_sessions.id"), nullable=False)
+    sequence_no = Column(Integer, nullable=False)
+    role = Column(String, nullable=False)  # user|assistant
+    content = Column(Text, nullable=False)
+    # Question ids the assistant grounded its answer in — null/empty for a
+    # user message, or for an assistant message that found nothing relevant.
+    cited_question_ids = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("ChatSession", back_populates="messages")
